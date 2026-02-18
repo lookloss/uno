@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNO</title>
+<style>
+html,body,#root{margin:0;padding:0;width:100%;height:100%;overflow:hidden}
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useCallback,useMemo}=React;
+
+const COLORS={red:"#EF4444",blue:"#3B82F6",green:"#22C55E",yellow:"#EAB308"};
+const CNAMES={red:"Czerwony",blue:"Niebieski",green:"Zielony",yellow:"Zolty"};
+const CDARKS={red:"#B91C1C",blue:"#1D4ED8",green:"#15803D",yellow:"#A16207"};
+const SYM={skip:"\u2298",reverse:"\u27F2",draw2:"+2",wild:"\u2605",wild4:"+4"};
+const AINAMES=["Bot Alpha","Bot Beta","Bot Gamma"];
+const AIEMOJI=["\uD83E\uDD16","\uD83D\uDC7E","\uD83C\uDFAD"];
+const PEMOJI="\uD83D\uDE0E";
+const MEDALS=["\uD83E\uDD47","\uD83E\uDD48","\uD83E\uDD49","4."];
+const UNO_TIME=5000;
+
+// ═══════ MULTIPLAYER CONFIG ═══════
+const DEFAULT_RULES={multiCard:true,stackDraw:true,drawUntilPlay:false,forcePlay:true,startCards:7,maxPlayers:4,unoTime:5};
+const RULE_LABELS={multiCard:"Multi-rzut (Shift)",stackDraw:"Podbijanie +2/+4",drawUntilPlay:"Ciagnij az zagrasz",forcePlay:"Musisz zagrac dobrana",unoTime:"Czas na UNO (s)"};
+const genCode=()=>{const c="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";let s="";for(let i=0;i<5;i++)s+=c[Math.floor(Math.random()*c.length)];return s};
+const MP_EMOJIS=["\uD83D\uDE0E","\uD83E\uDD16","\uD83D\uDC7E","\uD83C\uDFAD"];
+
+// ═══════ AUDIO ═══════
+class SndEngine{
+  constructor(){this.ctx=null;this.vol=0.3;this.muted=false}
+  init(){if(!this.ctx)this.ctx=new(window.AudioContext||window.webkitAudioContext)()}
+  t(type,freq,when,dur,v){
+    const o=this.ctx.createOscillator(),g=this.ctx.createGain();
+    o.type=type;o.frequency.value=freq;g.gain.setValueAtTime(v||this.vol,when);
+    g.gain.exponentialRampToValueAtTime(0.001,when+dur);
+    o.connect(g);g.connect(this.ctx.destination);o.start(when);o.stop(when+dur);
+  }
+  play(s){
+    if(this.muted||!this.ctx)return;
+    try{const n=this.ctx.currentTime;
+    if(s==="card"){const b=this.ctx.createBuffer(1,this.ctx.sampleRate*0.1,this.ctx.sampleRate);const d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;const src=this.ctx.createBufferSource();src.buffer=b;const f=this.ctx.createBiquadFilter();f.type="highpass";f.frequency.value=3000;const g=this.ctx.createGain();g.gain.setValueAtTime(this.vol*0.25,n);g.gain.exponentialRampToValueAtTime(0.001,n+0.1);src.connect(f);f.connect(g);g.connect(this.ctx.destination);src.start(n);src.stop(n+0.1)}
+    else if(s==="draw")this.t("sine",800,n,0.05);
+    else if(s==="special"){this.t("sine",1200,n,0.15);this.t("sine",1500,n+0.05,0.1)}
+    else if(s==="uno"){this.t("sine",523,n,0.12);this.t("sine",659,n+0.1,0.12);this.t("sine",784,n+0.2,0.2)}
+    else if(s==="win"){[523,659,784,1047,784,1047].forEach((f,i)=>this.t("sine",f,n+i*0.12,0.15))}
+    else if(s==="err")this.t("square",150,n,0.15,this.vol*0.3);
+    else if(s==="pen"){for(let i=0;i<4;i++)this.t("sine",600,n+i*0.06,0.04)}
+    else if(s==="deal")this.t("sine",1000+Math.random()*200,n,0.03,this.vol*0.12);
+    }catch(e){}
+  }
+}
+
+// ═══════ DECK ═══════
+let cid=0;
+function mkDeck(){
+  const d=[],cs=["red","blue","green","yellow"];
+  for(const c of cs){d.push({id:cid++,color:c,value:0,type:"number",symbol:"0"});for(let n=1;n<=9;n++)for(let x=0;x<2;x++)d.push({id:cid++,color:c,value:n,type:"number",symbol:String(n)})}
+  for(const c of cs)for(const a of["skip","reverse","draw2"])for(let x=0;x<2;x++)d.push({id:cid++,color:c,value:a,type:"action",symbol:SYM[a]});
+  for(let i=0;i<4;i++){d.push({id:cid++,color:null,value:"wild",type:"wild",symbol:SYM.wild});d.push({id:cid++,color:null,value:"wild4",type:"wild",symbol:SYM.wild4})}
+  return d;
+}
+function shuf(a){const r=[...a];for(let i=r.length-1;i>0;i--){const j=0|Math.random()*(i+1);[r[i],r[j]]=[r[j],r[i]]}return r}
+function canPlay(c,top,col,stk){if(stk>0)return(top.value==="draw2"&&c.value==="draw2")||(top.value==="wild4"&&c.value==="wild4");if(c.type==="wild")return true;if(c.color===col)return true;return c.value===top.value&&c.type===top.type}
+function pts(c){if(c.type==="number")return c.value;if(["skip","reverse","draw2"].includes(c.value))return 20;return 50}
+
+// ═══════ AI ═══════
+function aiPick(h,top,col,stk,diff){
+  const p=h.filter(c=>canPlay(c,top,col,stk));if(!p.length)return null;
+  if(diff==="easy")return p[0|Math.random()*p.length];
+  if(diff==="medium"){const a=p.filter(c=>c.type==="action"),n=p.filter(c=>c.type==="number"),w=p.filter(c=>c.type==="wild");if(a.length&&Math.random()>0.3)return a[0|Math.random()*a.length];if(n.length)return n[0|Math.random()*n.length];return w[0]||p[0]}
+  const sc=p.map(card=>{let s=0;const cc={};h.forEach(x=>{if(x.color)cc[x.color]=(cc[x.color]||0)+1});if(card.color&&cc[card.color])s+=cc[card.color]*2;if(card.type==="number")s+=card.value;if(card.type==="action")s+=8;if(card.type==="wild")s-=h.length>3?10:5;if(h.length<=2&&card.type==="wild")s+=20;return{card,s}});
+  sc.sort((a,b)=>b.s-a.s);return sc[0].card;
+}
+function aiCol(h,d){if(d==="easy")return["red","blue","green","yellow"][0|Math.random()*4];const cc={red:0,blue:0,green:0,yellow:0};h.forEach(c=>{if(c.color)cc[c.color]++});let b="red",m=0;for(const[c,n]of Object.entries(cc))if(n>m){m=n;b=c}return b}
+function aiStk(d){return Math.random()<(d==="easy"?0.3:d==="medium"?0.6:0.9)}
+
+// ═══════ FLYING CARD - requestAnimationFrame + deltaTime ═══════
+function FlyCard({card,back,fx,fy,tx,ty,dur,onDone}){
+  const ref=useRef(null);
+  const t0=useRef(null);
+  const dead=useRef(false);
+  useEffect(()=>{
+    let raf;
+    const step=ts=>{
+      if(dead.current)return;
+      if(!t0.current)t0.current=ts;
+      const p=Math.min(1,(ts-t0.current)/dur);
+      const e=1-Math.pow(1-p,3); // ease-out cubic
+      const x=fx+(tx-fx)*e;
+      const y=fy+(ty-fy)*e;
+      const rot=Math.sin(p*Math.PI*2)*8*(1-p);
+      const sc=1+Math.sin(p*Math.PI)*0.06;
+      const op=p<0.06?p/0.06:1;
+      if(ref.current)ref.current.style.cssText=`position:fixed;left:0;top:0;z-index:600;pointer-events:none;will-change:transform;transform:translate(${x}px,${y}px) rotate(${rot}deg) scale(${sc});opacity:${op}`;
+      if(p<1)raf=requestAnimationFrame(step);
+      else{dead.current=true;onDone&&onDone()}
+    };
+    raf=requestAnimationFrame(step);
+    return()=>{dead.current=true;cancelAnimationFrame(raf)};
+  },[]);
+
+  if(!back&&!card)return null;
+  const w=!back&&card?.type==="wild";
+  const bg=!back&&card&&!w?`radial-gradient(ellipse at 40% 40%,${COLORS[card.color]}dd,${CDARKS[card.color]})`:undefined;
+  const sym=card?.symbol||"";
+  return <div ref={ref} style={{position:"fixed",left:0,top:0,zIndex:600,pointerEvents:"none",opacity:0}}>
+    {back?<div style={{width:64,height:90,borderRadius:9,background:"linear-gradient(135deg,#1a1a2e,#16213e 50%,#0f3460)",border:"2px solid #2a2a4a",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Fredoka",fontWeight:700,fontSize:13,color:"#ff4444",textShadow:"0 0 8px rgba(255,68,68,0.5)",boxShadow:"0 4px 16px rgba(0,0,0,0.5)"}}>UNO</div>
+    :<div style={{width:64,height:90,borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Fredoka",fontWeight:700,boxShadow:"0 4px 16px rgba(0,0,0,0.5)",overflow:"hidden",position:"relative",background:w?"conic-gradient(#EF4444 0deg 90deg,#3B82F6 90deg 180deg,#22C55E 180deg 270deg,#EAB308 270deg 360deg)":bg}}>
+      {w&&<div style={{position:"absolute",inset:3,borderRadius:7,background:"rgba(0,0,0,0.3)"}}/>}
+      <span style={{fontSize:sym.length>1?18:24,color:"#fff",zIndex:2,textShadow:"1px 1px 3px rgba(0,0,0,0.5)"}}>{sym}</span>
+    </div>}
+  </div>;
+}
+
+// ═══════ CARD COMPONENT ═══════
+function Card({card,back,sm,play,sel,onClick,style,cls=""}){
+  if(back)return <div className={`cd cd-back ${sm?"cd-sm":""} ${cls}`} style={style} onClick={onClick}><div className="cdi"/></div>;
+  if(!card)return null;
+  const w=card.type==="wild";
+  const bg=w?undefined:`radial-gradient(ellipse at 40% 40%,${COLORS[card.color]}dd,${CDARKS[card.color]})`;
+  return <div className={`cd ${w?"cd-w":""} ${play?"cd-play":""} ${sel?"cd-sel":""} ${sm?"cd-sm":""} ${cls}`} style={{"--gl":`${(w?"#ffffff":COLORS[card.color])}40`,...style}} onClick={onClick}>
+    <div className="cdi" style={w?undefined:{background:bg}}>{!w&&<div className="cd-oval"/>}
+      <span className="cd-c cd-tl">{card.symbol}</span>
+      <span className="cd-s" style={{fontSize:sm?14:card.symbol.length>1?18:24}}>{card.symbol}</span>
+      <span className="cd-c cd-br">{card.symbol}</span>
+    </div>
+  </div>;
+}
+
+function Confetti(){
+  const p=useMemo(()=>{const c=["#EF4444","#3B82F6","#22C55E","#EAB308","#A855F7","#EC4899"];return Array.from({length:40},(_,i)=>({i,l:Math.random()*100,c:c[0|Math.random()*c.length],d:2+Math.random()*2,dl:Math.random()*1.5,s:6+Math.random()*8,r:Math.random()>.5?"50%":"0"}))},[]);
+  return p.map(x=><div key={x.i} className="confetti" style={{left:`${x.l}%`,width:x.s,height:x.s,background:x.c,borderRadius:x.r,"--fd":`${x.d}s`,"--dl":`${x.dl}s`}}/>);
+}
+
+// ═══════ CSS ═══════
+const CSS=`
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+.app{width:100vw;height:100vh;overflow:hidden;font-family:'Outfit',sans-serif;background:#0a0a0a;user-select:none}
+.table{width:100%;height:100%;background:radial-gradient(ellipse at 50% 50%,#1a5c2a 0%,#0d3318 60%,#071a0c 100%);position:relative;overflow:hidden}
+.table::before{content:'';position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg width='6' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='1' height='1' fill='%23ffffff08'/%3E%3C/svg%3E");pointer-events:none}
+.table::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 50%,transparent 40%,rgba(0,0,0,0.4) 100%);pointer-events:none}
+
+.cd{width:64px;height:90px;border-radius:9px;position:relative;display:flex;align-items:center;justify-content:center;font-family:'Fredoka',sans-serif;font-weight:700;cursor:pointer;flex-shrink:0;transition:transform .2s cubic-bezier(.4,0,.2,1),box-shadow .2s;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.cdi{width:100%;height:100%;border-radius:9px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.cd-s{font-size:24px;color:#fff;z-index:2;text-shadow:1px 1px 3px rgba(0,0,0,.5);line-height:1}
+.cd-c{position:absolute;font-size:9px;color:#fff;z-index:2;text-shadow:1px 1px 2px rgba(0,0,0,.5);font-weight:600;line-height:1}
+.cd-tl{top:4px;left:5px}.cd-br{bottom:4px;right:5px;transform:rotate(180deg)}
+.cd-oval{position:absolute;width:44px;height:62px;border-radius:50%;background:rgba(255,255,255,.13);transform:rotate(-20deg);z-index:1}
+.cd-back .cdi{background:linear-gradient(135deg,#1a1a2e,#16213e 50%,#0f3460);border:2px solid #2a2a4a}
+.cd-back .cdi::after{content:'UNO';position:absolute;font-family:'Fredoka',sans-serif;font-weight:700;font-size:13px;color:#ff4444;text-shadow:0 0 8px rgba(255,68,68,.5);transform:rotate(-20deg)}
+.cd-w .cdi{background:conic-gradient(#EF4444 0deg 90deg,#3B82F6 90deg 180deg,#22C55E 180deg 270deg,#EAB308 270deg 360deg)}
+.cd-w .cdi::before{content:'';position:absolute;inset:3px;border-radius:7px;background:rgba(0,0,0,.3)}
+@keyframes cg{0%,100%{box-shadow:0 -3px 10px 1px var(--gl)}50%{box-shadow:0 -4px 14px 3px var(--gl)}}
+.cd-play{animation:cg 2s ease-in-out infinite}
+.pcd:hover{transform:translateY(-14px)!important;z-index:100!important}
+.pcd.cd-play:hover{box-shadow:0 -4px 18px 4px var(--gl)!important}
+.cd-sel{transform:translateY(-18px)!important;z-index:99!important;outline:2px solid rgba(255,255,255,.7);outline-offset:2px}
+.cd-sm{width:42px;height:60px}.cd-sm .cd-s{font-size:16px}.cd-sm .cd-c{font-size:7px}
+.cd-fin{opacity:.3;pointer-events:none}
+
+@keyframes rcw{from{transform:translate(-50%,-50%) rotate(0)}to{transform:translate(-50%,-50%) rotate(360deg)}}
+@keyframes rccw{from{transform:translate(-50%,-50%) rotate(0)}to{transform:translate(-50%,-50%) rotate(-360deg)}}
+.dring{position:absolute;top:50%;left:50%;width:260px;height:260px;z-index:12;pointer-events:none}
+.dring.cw{animation:rcw 14s linear infinite}.dring.ccw{animation:rccw 14s linear infinite}
+
+.menu{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 30%,#1a2a5c 0%,#0a0a2a 60%,#050510 100%)}
+@keyframes tglow{0%,100%{text-shadow:0 0 20px #EF4444,0 0 40px #EF4444;color:#EF4444}25%{text-shadow:0 0 20px #3B82F6,0 0 40px #3B82F6;color:#3B82F6}50%{text-shadow:0 0 20px #22C55E,0 0 40px #22C55E;color:#22C55E}75%{text-shadow:0 0 20px #EAB308,0 0 40px #EAB308;color:#EAB308}}
+.m-title{font-family:'Fredoka',sans-serif;font-size:88px;font-weight:700;animation:tglow 4s ease-in-out infinite;letter-spacing:8px;margin-bottom:32px}
+.m-panel{background:rgba(255,255,255,.06);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:28px 36px;min-width:340px}
+.m-lbl{color:rgba(255,255,255,.55);font-size:11px;font-weight:500;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:5px;margin-top:16px}.m-lbl:first-child{margin-top:0}
+.m-inp{width:100%;padding:9px 12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:9px;color:#fff;font-size:14px;font-family:'Outfit',sans-serif;outline:none}.m-inp:focus{border-color:rgba(255,255,255,.4)}.m-inp::placeholder{color:rgba(255,255,255,.3)}
+.m-opts{display:flex;gap:6px}
+.m-opt{flex:1;padding:8px 4px;text-align:center;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.1);border-radius:9px;color:rgba(255,255,255,.6);cursor:pointer;transition:all .2s;font-size:13px;font-weight:500}.m-opt:hover{background:rgba(255,255,255,.1);color:#fff}.m-opt.act{border-color:#3B82F6;background:rgba(59,130,246,.15);color:#fff}
+.btn-go{width:100%;padding:13px;margin-top:22px;background:linear-gradient(135deg,#EF4444,#DC2626);border:none;border-radius:11px;color:#fff;font-size:18px;font-weight:700;font-family:'Fredoka',sans-serif;cursor:pointer;letter-spacing:2px;box-shadow:0 4px 18px rgba(239,68,68,.3)}.btn-go:hover{transform:translateY(-2px)}
+.btn-s{padding:11px 28px;margin-top:18px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:10px;color:rgba(255,255,255,.7);font-size:14px;font-family:'Outfit',sans-serif;cursor:pointer}.btn-s:hover{background:rgba(255,255,255,.12);color:#fff}
+.btn-mp{width:100%;padding:13px;margin-top:10px;background:linear-gradient(135deg,#3B82F6,#2563EB);border:none;border-radius:11px;color:#fff;font-size:18px;font-weight:700;font-family:'Fredoka',sans-serif;cursor:pointer;letter-spacing:2px;box-shadow:0 4px 18px rgba(59,130,246,.3)}.btn-mp:hover{transform:translateY(-2px)}
+.mp-back{position:absolute;top:20px;left:20px;padding:8px 16px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.6);font-size:13px;cursor:pointer;font-family:'Outfit',sans-serif;z-index:10}.mp-back:hover{background:rgba(255,255,255,.12);color:#fff}
+.mp-mode-btns{display:flex;gap:12px;margin-top:20px}
+.mp-mode-btn{flex:1;padding:20px 16px;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.1);border-radius:14px;cursor:pointer;text-align:center;transition:all .2s}.mp-mode-btn:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.25)}
+.mp-mode-ico{font-size:32px;margin-bottom:8px}
+.mp-mode-lbl{color:#fff;font-weight:600;font-size:14px}.mp-mode-sub{color:rgba(255,255,255,.4);font-size:11px;margin-top:4px}
+.lobby-code{font-family:'Fredoka',sans-serif;font-size:36px;font-weight:700;color:#EAB308;letter-spacing:6px;text-align:center;margin:12px 0;user-select:all}
+.lobby-players{margin:16px 0}
+.lobby-p{display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:10px;margin-bottom:6px}
+.lobby-p-name{flex:1;color:#fff;font-weight:500;font-size:14px}
+.lobby-p-host{font-size:10px;padding:2px 8px;background:rgba(234,179,8,.2);border:1px solid rgba(234,179,8,.3);border-radius:5px;color:#EAB308}
+.lobby-p-ready{font-size:10px;padding:2px 8px;border-radius:5px}
+.lobby-p-ready.yes{background:rgba(34,197,94,.2);border:1px solid rgba(34,197,94,.3);color:#22C55E}
+.lobby-p-ready.no{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.2);color:#EF4444}
+.lobby-kick{padding:4px 10px;background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#EF4444;font-size:11px;cursor:pointer}.lobby-kick:hover{background:rgba(239,68,68,.35)}
+.mp-rules{margin-top:16px}
+.mp-rule{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.mp-rule-lbl{color:rgba(255,255,255,.7);font-size:12px}
+.mp-toggle{width:38px;height:22px;border-radius:11px;background:rgba(255,255,255,.12);cursor:pointer;position:relative;transition:background .2s}
+.mp-toggle.on{background:rgba(34,197,94,.5)}
+.mp-toggle::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .2s}
+.mp-toggle.on::after{transform:translateX(16px)}
+.mp-err{color:#EF4444;font-size:12px;text-align:center;margin-top:8px}
+.mp-wait{display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.5);font-size:12px;justify-content:center;margin-top:12px}
+@keyframes mpspin{to{transform:rotate(360deg)}}
+.mp-spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#3B82F6;border-radius:50%;animation:mpspin .8s linear infinite}
+.lobby-section{margin-top:16px}
+.lobby-section-title{color:rgba(255,255,255,.4);font-size:10px;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px}
+
+.tbar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:8px 14px;z-index:20}
+.tbar-l{display:flex;align-items:center;gap:8px}.tbar-r{display:flex;gap:5px}
+.badge{padding:5px 12px;border-radius:8px;background:rgba(0,0,0,.55);color:rgba(255,255,255,.9);font-size:13px;font-weight:600;backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:4px}
+.ibtn{width:30px;height:30px;border-radius:7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center}.ibtn:hover{background:rgba(255,255,255,.15);color:#fff}
+
+@keyframes cpop{0%{transform:scale(.7);opacity:0}50%{transform:scale(1.1)}100%{transform:scale(1);opacity:1}}
+.col-ind{display:flex;flex-direction:column;align-items:center;gap:3px;animation:cpop .3s cubic-bezier(.34,1.56,.64,1) forwards}
+.col-circ{width:50px;height:50px;border-radius:50%;border:3px solid rgba(255,255,255,.25)}.col-lbl{font-size:11px;font-weight:600;font-family:'Fredoka',sans-serif;text-transform:uppercase;letter-spacing:1px}
+
+.pa{position:absolute;display:flex;flex-direction:column;align-items:center;z-index:10}
+.pa-b{bottom:0;left:50%;transform:translateX(-50%);width:100%;padding:0 14px 6px}
+.pa-t{top:6px;left:50%;transform:translateX(-50%)}.pa-l{left:6px;top:50%;transform:translateY(-50%)}.pa-r{right:6px;top:50%;transform:translateY(-50%)}
+.pi{display:flex;align-items:center;gap:5px;padding:4px 11px;border-radius:9px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);border:2px solid transparent;transition:all .3s;font-size:12px}
+.pi.act{border-color:#EAB308;box-shadow:0 0 14px rgba(234,179,8,.3)}.pi.fin{border-color:rgba(34,197,94,.3);opacity:.65}
+.pi-n{color:#fff;font-weight:600;font-size:12px}.pi-c{background:rgba(255,255,255,.15);padding:1px 6px;border-radius:4px;color:rgba(255,255,255,.8);font-size:10px;font-weight:600}.pi-p{font-size:10px;color:rgba(255,255,255,.4)}
+
+.hand{display:flex;justify-content:center}.hand-s{display:flex;justify-content:center;overflow-x:auto;overflow-y:visible;max-width:88vw;padding:28px 16px 14px;scrollbar-width:thin}
+.ai-h{display:flex;justify-content:center}.ai-s{margin:0 -7px}.ai-hv{display:flex;flex-direction:column}.ai-sv{margin:-11px 0}
+
+.center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:26px;z-index:15}
+.pile{position:relative;width:82px;height:108px}.disc{position:absolute;top:0;left:0}
+.deck{position:relative;width:68px;height:94px;cursor:pointer;transition:box-shadow .3s,transform .3s}.dk-s{position:absolute;top:0;left:0}
+@keyframes deckGlow{0%,100%{box-shadow:0 0 10px 2px rgba(59,130,246,.35),inset 0 0 0 1px rgba(59,130,246,.15)}50%{box-shadow:0 0 18px 5px rgba(59,130,246,.5),inset 0 0 0 1px rgba(59,130,246,.25)}}
+.deck-draw{animation:deckGlow 1.5s ease-in-out infinite;border-radius:10px;padding:2px}
+.dk-n{position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.45);font-size:10px;white-space:nowrap}
+@keyframes spulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+.d-stk{position:absolute;top:-26px;left:50%;transform:translateX(-50%);z-index:30;padding:3px 12px;background:rgba(220,38,38,.9);border-radius:7px;border:2px solid #FCA5A5;font-family:'Fredoka',sans-serif;font-size:16px;font-weight:700;color:#fff;animation:spulse .8s ease-in-out infinite;pointer-events:none}
+
+.dbtn{position:absolute;bottom:215px;left:50%;transform:translateX(-50%);z-index:20;padding:10px 24px;border-radius:10px;background:linear-gradient(135deg,#3B82F6,#2563EB);border:none;color:#fff;font-size:14px;font-weight:600;font-family:'Outfit',sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(59,130,246,.4)}.dbtn:hover{transform:translateX(-50%) translateY(-2px)}
+.dbar{position:absolute;bottom:215px;left:50%;transform:translateX(-50%);z-index:20;display:flex;gap:8px}
+.mbar{position:absolute;bottom:215px;left:50%;transform:translateX(-50%);z-index:22;display:flex;align-items:center;gap:8px;padding:7px 18px;border-radius:11px;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.15)}
+.mbar-play{padding:7px 18px;border-radius:8px;background:linear-gradient(135deg,#22C55E,#16A34A);border:none;color:#fff;font-size:12px;font-weight:600;cursor:pointer}
+.mbar-x{padding:7px 12px;border-radius:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.6);font-size:11px;cursor:pointer}
+
+.uno-static{display:flex;flex-direction:column;align-items:center;gap:2px}
+.uno-pill{padding:8px 18px;border-radius:10px;font-family:'Fredoka',sans-serif;font-size:16px;font-weight:700;letter-spacing:2px;background:linear-gradient(135deg,#EF4444,#DC2626);border:2px solid rgba(252,165,165,.3);color:rgba(255,255,255,.5);cursor:pointer;transition:all .3s}
+.uno-pill:hover{box-shadow:0 0 14px rgba(239,68,68,.3);transform:scale(1.05)}
+.uno-pill.active{border-color:#FCA5A5;color:#fff;box-shadow:0 0 14px rgba(239,68,68,.4)}
+.uno-cd{width:28px;height:3px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden}
+.uno-cd-bar{height:100%;border-radius:2px;background:#EF4444;transition:width .05s linear}
+@keyframes ubounce{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+.uno-jump{position:fixed;z-index:85;display:flex;flex-direction:column;align-items:center;gap:4px;transition:left .15s cubic-bezier(.4,0,.2,1),top .15s cubic-bezier(.4,0,.2,1)}
+.uno-jump-btn{padding:16px 32px;background:linear-gradient(135deg,#EF4444,#DC2626);border:3px solid #FCA5A5;border-radius:14px;cursor:pointer;font-family:'Fredoka',sans-serif;font-size:24px;font-weight:700;color:#fff;letter-spacing:3px;animation:ubounce .5s ease-in-out infinite;box-shadow:0 0 28px rgba(239,68,68,.5)}
+
+@keyframes unoflash{0%{transform:translate(-50%,-50%) scale(0);opacity:1}50%{transform:translate(-50%,-50%) scale(1.5)}100%{transform:translate(-50%,-50%) scale(2);opacity:0}}
+.uno-flash{position:fixed;top:50%;left:50%;font-family:'Fredoka',sans-serif;font-size:68px;font-weight:700;color:#EF4444;z-index:90;text-shadow:0 0 30px #EF4444;animation:unoflash 1s ease-out forwards;pointer-events:none}
+
+@keyframes tdot{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1.2)}}
+.think{display:flex;gap:3px;padding:3px 7px;background:rgba(0,0,0,.4);border-radius:5px;margin-top:3px}
+.think-d{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.7);animation:tdot 1.2s ease-in-out infinite}.think-d:nth-child(2){animation-delay:.2s}.think-d:nth-child(3){animation-delay:.4s}
+
+.ttimer{width:160px;height:3px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden;margin-top:3px}
+.ttimer-bar{height:100%;border-radius:2px;transition:width 1s linear,background .5s}
+
+@keyframes skipfade{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}30%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}70%{opacity:1}100%{opacity:0}}
+.skip-eff{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:46px;z-index:50;animation:skipfade 1s ease-out forwards;pointer-events:none}
+
+.log{position:absolute;top:40px;left:10px;width:210px;max-height:180px;z-index:25;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.08);border-radius:9px;overflow:hidden}
+.log-h{padding:5px 9px;font-size:10px;font-weight:600;color:rgba(255,255,255,.4);letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between;cursor:pointer}
+.log-body{max-height:150px;overflow-y:auto;padding:3px 0;scrollbar-width:thin}
+.le{padding:2px 9px;font-size:10px;color:rgba(255,255,255,.45);line-height:1.3}.le-a{color:#EAB308}.le-p{color:#EF4444}.le-u{color:#F59E0B;font-weight:600}
+
+.re-ov{position:fixed;inset:0;z-index:700;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center}
+.re-panel{background:linear-gradient(135deg,rgba(20,20,40,.97),rgba(10,10,25,.97));border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:32px 40px;text-align:center;min-width:320px}
+.re-t{font-family:'Fredoka',sans-serif;font-size:30px;font-weight:700;color:#EAB308;margin-bottom:5px}.re-sub{color:rgba(255,255,255,.5);font-size:12px;margin-bottom:16px}
+.pod-row{display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:9px;margin-bottom:4px;background:rgba(255,255,255,.03)}
+.pod-row.gold{background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.2)}.pod-row.silver{background:rgba(192,192,192,.08);border:1px solid rgba(192,192,192,.15)}.pod-row.bronze{background:rgba(205,127,50,.08);border:1px solid rgba(205,127,50,.15)}
+.pod-m{font-size:18px;width:26px;text-align:center}.pod-n{color:rgba(255,255,255,.8);font-weight:500;flex:1;text-align:left;font-size:13px}.pod-pts{color:#fff;font-weight:700;font-family:'Fredoka',sans-serif;font-size:16px}
+.btn-n{padding:10px 28px;margin-top:16px;background:linear-gradient(135deg,#3B82F6,#2563EB);border:none;border-radius:9px;color:#fff;font-size:14px;font-weight:600;font-family:'Outfit',sans-serif;cursor:pointer;margin-right:6px}
+
+@keyframes conffall{0%{transform:translateY(-10vh) rotate(0);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}
+.confetti{position:fixed;z-index:110;top:0;pointer-events:none;animation:conffall var(--fd) ease-in forwards;animation-delay:var(--dl)}
+
+.cp-ov{position:fixed;inset:0;z-index:700;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center}
+.cp-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:26px;background:rgba(20,20,30,.95);border-radius:20px;border:1px solid rgba(255,255,255,.1)}
+.cp-title{grid-column:1/3;text-align:center;color:#fff;font-size:17px;font-weight:700;font-family:'Fredoka',sans-serif;margin-bottom:4px}
+.cp-btn{width:68px;height:68px;border-radius:50%;border:4px solid rgba(255,255,255,.2);cursor:pointer;transition:transform .2s,box-shadow .2s}.cp-btn:hover{transform:scale(1.15);box-shadow:0 0 20px var(--bc)}
+
+.deal-ov{position:fixed;inset:0;z-index:55;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.deal-txt{font-family:'Fredoka',sans-serif;font-size:22px;color:rgba(255,255,255,.5)}
+
+.shint{position:absolute;bottom:3px;right:12px;z-index:5;padding:3px 9px;border-radius:5px;background:rgba(0,0,0,.3);color:rgba(255,255,255,.2);font-size:9px;pointer-events:none}
+`;
+
+// ═══════ MAIN GAME ═══════
+function UnoGame(){
+  const audio=useRef(new SndEngine());
+  const unoTimer=useRef(null);
+  const aiTimer=useRef(null);
+  const pileRef=useRef(null);
+  const deckRef=useRef(null);
+
+  // Menu state
+  const[phase,setPhase]=useState("MENU");
+  const[playerName,setPlayerName]=useState("");
+  const[numPlayers,setNumPlayers]=useState(2);
+  const[difficulty,setDifficulty]=useState("medium");
+  const[showRules,setShowRules]=useState(false);
+  const[soundOn,setSoundOn]=useState(true);
+  const[logOpen,setLogOpen]=useState(true);
+
+  // Game state
+  const[players,setPlayers]=useState([]);
+  const[deckCards,setDeck]=useState([]);
+  const[discardPile,setDiscard]=useState([]);
+  const[currentPlayer,setCurrent]=useState(0);
+  const[direction,setDirection]=useState(1);
+  const[activeColor,setColor]=useState(null);
+  const[drawStack,setDrawStack]=useState(0);
+  const[roundNum,setRoundNum]=useState(1);
+  const[logEntries,setLog]=useState([]);
+  const[turnTimer,setTurnTimer]=useState(30);
+  const[aiThinking,setAiThinking]=useState(-1);
+  const[skipEffect,setSkipEffect]=useState(null);
+
+  // UNO state: "idle" -> "waiting" (5s timer, click static to spawn jumper) -> "jumping" (catch it)
+  const[unoTarget,setUnoTarget]=useState(-1);
+  const[unoPhase,setUnoPhase]=useState("idle"); // idle | waiting | jumping
+  const[unoCountdown,setUnoCountdown]=useState(5);
+  const[unoFlash,setUnoFlash]=useState(false);
+  const[unoPos,setUnoPos]=useState({x:50,y:50});
+
+  // Other
+  const[colorPicker,setColorPicker]=useState(null); // card index or "multi"
+  const[drawnCard,setDrawnCard]=useState(null);
+  const[confetti,setConfetti]=useState(false);
+  const[podium,setPodium]=useState([]);
+  const[selected,setSelected]=useState([]); // multi-select indices (in click order)
+  const[shiftHeld,setShiftHeld]=useState(false);
+  const[flyCards,setFlyCards]=useState([]);
+  const flyIdRef=useRef(0);
+  const[dealing,setDealing]=useState(false);
+
+  // ═══════ MULTIPLAYER STATE ═══════
+  const[mpRoomCode,setMpRoomCode]=useState("");
+  const[mpJoinCode,setMpJoinCode]=useState("");
+  const[mpRules,setMpRules]=useState({...DEFAULT_RULES});
+  const[mpPlayers,setMpPlayers]=useState([]); // [{id,name,emoji,isHost,ready}]
+  const[mpMyId,setMpMyId]=useState(null);
+  const[mpIsHost,setMpIsHost]=useState(false);
+  const[mpPrivate,setMpPrivate]=useState(false);
+  const[mpError,setMpError]=useState("");
+  const[mpConnecting,setMpConnecting]=useState(false);
+  const peerRef=useRef(null);       // PeerJS Peer instance
+  const connsRef=useRef([]);         // host: array of DataConnections to clients
+  const hostConnRef=useRef(null);    // client: DataConnection to host
+  const mpPlayersRef=useRef([]);     // live ref for lobby broadcasts
+  useEffect(()=>{mpPlayersRef.current=mpPlayers},[mpPlayers]);
+
+  // Shift key tracking
+  useEffect(()=>{
+    const dn=e=>{if(e.key==="Shift")setShiftHeld(true)};
+    const up=e=>{if(e.key==="Shift")setShiftHeld(false)};
+    window.addEventListener("keydown",dn);window.addEventListener("keyup",up);
+    return()=>{window.removeEventListener("keydown",dn);window.removeEventListener("keyup",up)};
+  },[]);
+
+  // Helpers
+  const addLog=useCallback((msg,type="n")=>setLog(prev=>[...prev.slice(-30),{msg,type}]),[]);
+  const snd=useCallback(s=>{if(soundOn){audio.current.init();audio.current.play(s)}},[soundOn]);
+  useEffect(()=>{audio.current.muted=!soundOn},[soundOn]);
+
+  const reshuffle=useCallback((deck,disc)=>{
+    if(deck.length>0)return{deck,disc};
+    if(disc.length<=1)return{deck,disc};
+    return{deck:shuf(disc.slice(0,-1)),disc:[disc[disc.length-1]]};
+  },[]);
+
+  const drawCards=useCallback((count,deck,disc)=>{
+    let dk=[...deck],dd=[...disc];const drawn=[];
+    for(let i=0;i<count;i++){
+      if(!dk.length){const r=reshuffle(dk,dd);dk=r.deck;dd=r.disc}
+      if(dk.length)drawn.push(dk.pop());
+    }
+    return{drawn,deck:dk,disc:dd};
+  },[reshuffle]);
+
+  const nextActive=useCallback((cur,dir,pls,pod,skip=0)=>{
+    const n=pls.length;let i=cur,sk=skip;
+    for(let a=0;a<n*3;a++){i=(i+dir+n)%n;if(pod.includes(i))continue;if(sk>0){sk--;continue}return i}
+    return cur;
+  },[]);
+
+  // Screen positions for fly animations
+  function posKey(i,n){if(i===0)return"b";if(n===2)return"t";if(n===3)return i===1?"l":"r";return i===1?"l":i===2?"t":"r"}
+  function screenPos(pos){
+    const w=window.innerWidth,h=window.innerHeight;
+    if(pos==="b")return{x:w/2-32,y:h-100};
+    if(pos==="t")return{x:w/2-32,y:50};
+    if(pos==="l")return{x:50,y:h/2-30};
+    if(pos==="r")return{x:w-100,y:h/2-30};
+    return{x:w/2,y:h/2};
+  }
+  function pilePos(){
+    if(pileRef.current){const r=pileRef.current.getBoundingClientRect();return{x:r.left+r.width/2-32,y:r.top+r.height/2-45}}
+    return{x:window.innerWidth/2,y:window.innerHeight/2-45};
+  }
+  function deckPos(){
+    if(deckRef.current){const r=deckRef.current.getBoundingClientRect();return{x:r.left+r.width/2-32,y:r.top+r.height/2-45}}
+    return{x:window.innerWidth/2-60,y:window.innerHeight/2-45};
+  }
+
+  // Spawn fly animation
+  const spawnFly=useCallback((card,back,fx,fy,tx,ty,dur=380)=>{
+    const id=flyIdRef.current++;
+    setFlyCards(prev=>[...prev,{id,card,back,fx,fy,tx,ty,dur}]);
+    setTimeout(()=>setFlyCards(prev=>prev.filter(f=>f.id!==id)),dur+50);
+  },[]);
+
+  // ═══════ START GAME ═══════
+  const startGame=useCallback(()=>{
+    cid=0;let deck=shuf(mkDeck());
+    const name=playerName.trim()||"Gracz";
+    const pls=[{name,emoji:PEMOJI,type:"human",hand:[],score:0}];
+    for(let i=0;i<numPlayers-1;i++)pls.push({name:AINAMES[i],emoji:AIEMOJI[i],type:"ai",difficulty,hand:[],score:0});
+
+    // Prepare deal queue
+    const dealQueue=[];
+    for(let c=0;c<7;c++)for(let i=0;i<pls.length;i++)dealQueue.push({pi:i,card:deck.pop()});
+
+    // First discard - must be a number card
+    let first=deck.pop();
+    while(first.type!=="number"){deck.unshift(first);deck=shuf(deck);first=deck.pop()}
+    let startColor=first.color;
+
+    // Random starting player
+    const startPlayer=Math.floor(Math.random()*pls.length);
+
+    // Reset all state
+    setPlayers(pls);setDeck(deck);setDiscard([first]);setColor(startColor);
+    setCurrent(startPlayer);setDirection(1);setDrawStack(0);
+    setLog([]);setPodium([]);setDrawnCard(null);setUnoTarget(-1);setUnoPhase("idle");
+    setAiThinking(-1);setTurnTimer(30);setSelected([]);setFlyCards([]);
+    setPhase("PLAY");setDealing(true);
+    addLog(`Runda ${roundNum} - ${pls[startPlayer].name} zaczyna!`,"a");
+
+    // Animated dealing - one card at a time
+    let idx=0;
+    const dealNext=()=>{
+      if(idx>=dealQueue.length){setDealing(false);return}
+      const{pi,card}=dealQueue[idx];
+      const from=deckPos();
+      const to=screenPos(posKey(pi,pls.length));
+      spawnFly(card,pi!==0,from.x,from.y,to.x,to.y,220);
+      snd("deal");
+      setPlayers(prev=>prev.map((p,i)=>i===pi?{...p,hand:[...p.hand,card]}:p));
+      idx++;
+      setTimeout(dealNext,75);
+    };
+    setTimeout(dealNext,350);
+  },[playerName,numPlayers,difficulty,roundNum,addLog,snd,spawnFly]);
+
+  const nextRound=useCallback(()=>{setConfetti(false);setRoundNum(r=>r+1);startGame()},[startGame]);
+  const mpCleanup=useCallback(()=>{
+    connsRef.current.forEach(c=>c.open&&c.close());connsRef.current=[];
+    if(hostConnRef.current){hostConnRef.current.close();hostConnRef.current=null}
+    if(peerRef.current){peerRef.current.destroy();peerRef.current=null}
+  },[]);
+  const toMenu=useCallback(()=>{setConfetti(false);setPhase("MENU");setPlayers([]);setRoundNum(1);clearTimeout(unoTimer.current);clearTimeout(aiTimer.current);mpCleanup()},[mpCleanup]);
+
+  // ═══════ MULTIPLAYER NETWORKING (PeerJS P2P) ═══════
+  const PEER_PREFIX="UNOG-";
+
+  // Host: broadcast message to all connected clients
+  const mpBroadcast=useCallback((msg)=>{
+    const str=JSON.stringify(msg);
+    connsRef.current.forEach(c=>{if(c.open)c.send(str)});
+  },[]);
+
+  // Host: broadcast lobby state
+  const mpBroadcastLobby=useCallback((pls,rules)=>{
+    mpBroadcast({t:"lobby",players:pls||mpPlayersRef.current,rules:rules||undefined});
+  },[mpBroadcast]);
+
+  // Host: handle incoming message from a client
+  const mpHostHandleMsg=useCallback((data,connId)=>{
+    try{
+      const msg=typeof data==="string"?JSON.parse(data):data;
+      if(msg.t==="join"){
+        const cur=mpPlayersRef.current;
+        if(cur.length>=4){mpBroadcast({t:"error",msg:"Pokoj pelny"});return}
+        if(cur.find(p=>p.id===connId))return;
+        const np=[...cur,{id:connId,name:msg.name||"Gracz",emoji:MP_EMOJIS[cur.length]||PEMOJI,isHost:false,ready:false}];
+        setMpPlayers(np);mpPlayersRef.current=np;
+        mpBroadcastLobby(np);
+      }
+      else if(msg.t==="ready"){
+        const np=mpPlayersRef.current.map(p=>p.id===connId?{...p,ready:!!msg.ready}:p);
+        setMpPlayers(np);mpPlayersRef.current=np;
+        mpBroadcastLobby(np);
+      }
+    }catch(e){console.error("host msg err",e)}
+  },[mpBroadcast,mpBroadcastLobby]);
+
+  // Client: handle incoming message from host
+  const mpClientHandleMsg=useCallback((data)=>{
+    try{
+      const msg=typeof data==="string"?JSON.parse(data):data;
+      if(msg.t==="lobby"){
+        setMpPlayers(msg.players);
+        if(msg.rules)setMpRules(msg.rules);
+      }
+      else if(msg.t==="kicked"){
+        setMpError("Zostales wyrzucony z pokoju");mpCleanup();setPhase("MP_MODE");
+      }
+      else if(msg.t==="error"){setMpError(msg.msg||"Blad")}
+      else if(msg.t==="start_game"){
+        // Host sent game start signal - start local game with these players as AI stand-ins
+        // In full MP this would be state sync, for now AI placeholders
+        setPhase("PLAY");
+      }
+    }catch(e){console.error("client msg err",e)}
+  },[mpCleanup]);
+
+  // Create room (HOST)
+  const mpCreateRoom=useCallback(()=>{
+    const code=genCode();
+    const name=playerName.trim()||"Gracz";
+    const myId="host-"+code;
+    setMpRoomCode(code);setMpMyId(myId);setMpIsHost(true);setMpError("");setMpConnecting(true);
+
+    const me={id:myId,name,emoji:PEMOJI,isHost:true,ready:true};
+    setMpPlayers([me]);mpPlayersRef.current=[me];
+
+    const peer=new Peer(PEER_PREFIX+code,{debug:0,config:{iceServers:[
+      {urls:"stun:stun.relay.metered.ca:80"},
+      {urls:"turn:standard.relay.metered.ca:80",username:"013826048e4d7e865544af4e",credential:"kP0bBbisGd9H6AKB"},
+      {urls:"turn:standard.relay.metered.ca:80?transport=tcp",username:"013826048e4d7e865544af4e",credential:"kP0bBbisGd9H6AKB"},
+      {urls:"turn:standard.relay.metered.ca:443",username:"013826048e4d7e865544af4e",credential:"kP0bBbisGd9H6AKB"},
+      {urls:"turns:standard.relay.metered.ca:443?transport=tcp",username:"013826048e4d7e865544af4e",credential:"kP0bBbisGd9H6AKB"}
+    ]}});
+    peerRef.current=peer;
+
+    peer.on("open",()=>{
+      setMpConnecting(false);setPhase("MP_LOBBY");
+      addLog(`Pokoj ${code} - P2P aktywny`,"a");
+    });
+
+    peer.on("connection",(conn)=>{
+      conn.on("open",()=>{
+        connsRef.current=[...connsRef.current,conn];
+        conn.on("data",(d)=>mpHostHandleMsg(d,conn.peer));
+        conn.on("close",()=>{
+          connsRef.current=connsRef.current.filter(c=>c.peer!==conn.peer);
+          const np=mpPlayersRef.current.filter(p=>p.id!==conn.peer);
+          setMpPlayers(np);mpPlayersRef.current=np;
+          mpBroadcastLobby(np);
+        });
+      });
+    });
+
+    peer.on("error",(err)=>{
+      console.error("Peer error:",err);
+      if(err.type==="unavailable-id"){setMpError("Kod zajety, sprobuj ponownie");setPhase("MP_CREATE");mpCleanup()}
+      else setMpError("Blad polaczenia: "+err.type);
+      setMpConnecting(false);
+    });
+  },[playerName,addLog,mpHostHandleMsg,mpBroadcastLobby,mpCleanup]);
+
+  // Join room (CLIENT)
+  const mpJoinRoom=useCallback(()=>{
+    const code=mpJoinCode.trim().toUpperCase();
+    if(code.length<4){setMpError("Kod za krotki");return}
+    const name=playerName.trim()||"Gracz";
+    setMpRoomCode(code);setMpIsHost(false);setMpConnecting(true);setMpError("");
+
+    const peer=new Peer(undefined,{debug:0,config:{iceServers:[
+      {urls:"stun:stun.relay.metered.ca:80"},
+      {urls:"turn:standard.relay.metered.ca:80",username:"013826048e4d7e865544af4e",credential:"kP0bBbisGd9H6AKB"},
+      {urls:"turn:standard.relay.metered.ca:80?transport=tcp",username:"013826048e4d7e865544af4e",credential:"kP0bBbisGd9H6AKB"},
+      {urls:"turn:standard.relay.metered.ca:443",username:"013826048e4d7e865544af4e",credential:"kP0bBbisGd9H6AKB"},
+      {urls:"turns:standard.relay.metered.ca:443?transport=tcp",username:"013826048e4d7e865544af4e",credential:"kP0bBbisGd9H6AKB"}
+    ]}});
+    peerRef.current=peer;
+
+    peer.on("open",(id)=>{
+      setMpMyId(id);
+      const conn=peer.connect(PEER_PREFIX+code,{reliable:true});
+      hostConnRef.current=conn;
+
+      conn.on("open",()=>{
+        setMpConnecting(false);setPhase("MP_LOBBY");
+        conn.send(JSON.stringify({t:"join",name}));
+      });
+
+      conn.on("data",(d)=>mpClientHandleMsg(d));
+      conn.on("close",()=>{
+        setMpError("Polaczenie z hostem utracone");setPhase("MP_MODE");mpCleanup();
+      });
+
+      setTimeout(()=>{
+        if(!conn.open){setMpError("Nie znaleziono pokoju o kodzie "+code);setMpConnecting(false);mpCleanup()}
+      },8000);
+    });
+
+    peer.on("error",(err)=>{
+      console.error("Peer error:",err);
+      if(err.type==="peer-unavailable"){setMpError("Pokoj "+code+" nie istnieje");setPhase("MP_JOIN")}
+      else setMpError("Blad: "+err.type);
+      setMpConnecting(false);mpCleanup();
+    });
+  },[mpJoinCode,playerName,mpClientHandleMsg,mpCleanup]);
+
+  // Kick player (host)
+  const mpKick=useCallback((pid)=>{
+    if(!mpIsHost)return;
+    const conn=connsRef.current.find(c=>c.peer===pid);
+    if(conn&&conn.open)conn.send(JSON.stringify({t:"kicked"}));
+    setTimeout(()=>{if(conn&&conn.open)conn.close()},200);
+    const np=mpPlayersRef.current.filter(p=>p.id!==pid);
+    setMpPlayers(np);mpPlayersRef.current=np;
+    mpBroadcastLobby(np);
+  },[mpIsHost,mpBroadcastLobby]);
+
+  // Toggle ready (client)
+  const mpToggleReady=useCallback(()=>{
+    if(mpIsHost)return;
+    const me=mpPlayers.find(p=>p.id===mpMyId);
+    const newReady=!me?.ready;
+    // Optimistic update
+    setMpPlayers(prev=>prev.map(p=>p.id===mpMyId?{...p,ready:newReady}:p));
+    if(hostConnRef.current?.open)hostConnRef.current.send(JSON.stringify({t:"ready",ready:newReady}));
+  },[mpMyId,mpIsHost,mpPlayers]);
+
+  // Update rule (host or pre-lobby)
+  const mpSetRule=useCallback((key,val)=>{
+    setMpRules(prev=>{const nr={...prev,[key]:val};
+      if(mpIsHost&&connsRef.current.length)mpBroadcast({t:"lobby",players:mpPlayersRef.current,rules:nr});
+      return nr;
+    });
+  },[mpIsHost,mpBroadcast]);
+
+  // Start multiplayer game (host) - for now uses AI stand-ins for remote players
+  const mpStartGame=useCallback(()=>{
+    if(!mpIsHost||mpPlayers.length<2)return;
+    if(!mpPlayers.every(p=>p.ready||p.isHost)){setMpError("Nie wszyscy gotowi!");return}
+    mpBroadcast({t:"start_game"});
+
+    // Start game locally with MP players (AI placeholders for remote)
+    cid=0;let deck=shuf(mkDeck());
+    const pls=mpPlayers.map((mp,i)=>({name:mp.name,emoji:mp.emoji,type:i===0?"human":"ai",difficulty:"medium",hand:[],score:0}));
+    const dealQueue=[];
+    for(let c=0;c<mpRules.startCards;c++)for(let i=0;i<pls.length;i++)dealQueue.push({pi:i,card:deck.pop()});
+    let first=deck.pop();
+    while(first.type!=="number"){deck.unshift(first);deck=shuf(deck);first=deck.pop()}
+    const startPlayer=Math.floor(Math.random()*pls.length);
+    setPlayers(pls);setDeck(deck);setDiscard([first]);setColor(first.color);
+    setCurrent(startPlayer);setDirection(1);setDrawStack(0);
+    setLog([]);setPodium([]);setDrawnCard(null);setUnoTarget(-1);setUnoPhase("idle");
+    setAiThinking(-1);setTurnTimer(30);setSelected([]);setFlyCards([]);
+    setPhase("PLAY");setDealing(true);
+    addLog(`Multiplayer - ${pls[startPlayer].name} zaczyna!`,"a");
+    let idx=0;
+    const dealNext=()=>{
+      if(idx>=dealQueue.length){setDealing(false);return}
+      const{pi,card}=dealQueue[idx];
+      const from=deckPos();const to=screenPos(posKey(pi,pls.length));
+      spawnFly(card,pi!==0,from.x,from.y,to.x,to.y,220);
+      snd("deal");
+      setPlayers(prev=>prev.map((p,i)=>i===pi?{...p,hand:[...p.hand,card]}:p));
+      idx++;setTimeout(dealNext,75);
+    };
+    setTimeout(dealNext,350);
+  },[mpIsHost,mpPlayers,mpRules,mpBroadcast,addLog,snd,spawnFly]);
+
+  // ═══════ WIN CHECK ═══════
+  const checkWin=useCallback((pls,pod,pi)=>{
+    if(pls[pi].hand.length>0)return false;
+    const newPod=[...pod,pi];setPodium(newPod);
+    snd(newPod.length===1?"win":"special");
+    addLog(`${MEDALS[newPod.length-1]} ${pls[pi].name} konczy!`,"u");
+    let points=0;pls.forEach((p,i)=>{if(!newPod.includes(i))p.hand.forEach(c=>points+=pts(c))});
+    const updated=pls.map((p,i)=>i===pi?{...p,score:p.score+points}:p);setPlayers(updated);
+    const remaining=updated.filter((_,i)=>!newPod.includes(i));
+    if(remaining.length<=1){
+      const lastIdx=updated.findIndex((_,i)=>!newPod.includes(i));
+      setPodium(lastIdx>=0?[...newPod,lastIdx]:newPod);
+      setConfetti(true);setPhase(updated.some(p=>p.score>=500)?"OVER":"END");return true;
+    }
+    if(newPod.length===1)setConfetti(true);
+    return true;
+  },[addLog,snd]);
+
+  // ═══════ UNO TRIGGER ═══════
+  const triggerUno=useCallback((pi,pls)=>{
+    if(pls[pi].hand.length!==1)return;
+    if(pls[pi].type==="ai"){
+      setTimeout(()=>{setUnoFlash(true);snd("uno");addLog(`${pls[pi].name} UNO!`,"u");setTimeout(()=>setUnoFlash(false),1000)},300+Math.random()*500);
+    }else{
+      setUnoTarget(pi);setUnoPhase("waiting");setUnoCountdown(5);
+    }
+  },[snd,addLog]);
+
+  // UNO penalty timeout - 5s total
+  useEffect(()=>{
+    if(unoTarget<0||unoPhase==="idle")return;
+    unoTimer.current=setTimeout(()=>{
+      setUnoTarget(-1);setUnoPhase("idle");
+      const r=drawCards(2,deckCards,discardPile);
+      setPlayers(prev=>prev.map((p,i)=>i===unoTarget?{...p,hand:[...p.hand,...r.drawn]}:p));
+      setDeck(r.deck);setDiscard(r.disc);
+      snd("pen");addLog("Nie zawalal UNO! +2 karty","p");
+    },UNO_TIME);
+    return()=>clearTimeout(unoTimer.current);
+  },[unoTarget,unoPhase,deckCards,discardPile,drawCards,snd,addLog]);
+
+  // UNO countdown animation
+  useEffect(()=>{if(unoTarget<0||unoPhase==="idle")return;const iv=setInterval(()=>setUnoCountdown(p=>Math.max(0,p-0.05)),50);return()=>clearInterval(iv)},[unoTarget,unoPhase]);
+  // UNO jumping position
+  useEffect(()=>{if(unoPhase!=="jumping")return;const iv=setInterval(()=>setUnoPos({x:8+Math.random()*78,y:8+Math.random()*58}),650);return()=>clearInterval(iv)},[unoPhase]);
+
+  // Click static UNO button -> spawn jumper
+  const clickStaticUno=useCallback(()=>{
+    if(unoPhase!=="waiting")return;
+    setUnoPhase("jumping");setUnoPos({x:20+Math.random()*60,y:15+Math.random()*50});
+  },[unoPhase]);
+
+  // Click jumping UNO button -> success
+  const clickJumpingUno=useCallback(()=>{
+    clearTimeout(unoTimer.current);setUnoTarget(-1);setUnoPhase("idle");
+    setUnoFlash(true);snd("uno");addLog(`${players[0]?.name||"Gracz"} UNO!`,"u");
+    setTimeout(()=>setUnoFlash(false),1000);
+  },[snd,addLog,players]);
+
+  // ═══════ PLAY CARD ═══════
+  const playCard=useCallback((pi,cardIdx,chosenColor=null)=>{
+    const pls=[...players];const player={...pls[pi],hand:[...pls[pi].hand]};
+    const card=player.hand[cardIdx];
+    player.hand.splice(cardIdx,1);pls[pi]=player;
+
+    // Fly animation
+    const from=screenPos(posKey(pi,pls.length));
+    const to=pilePos();
+    spawnFly(card,false,from.x,from.y,to.x,to.y,320);
+
+    const newDiscard=[...discardPile,card];
+    let newColor=card.color||chosenColor||activeColor;
+    let newDir=direction,newStack=0,skip=false;
+
+    if(card.value==="skip"){skip=true;snd("special");setSkipEffect(nextActive(pi,direction,pls,podium));setTimeout(()=>setSkipEffect(null),1000);addLog(`${player.name} Skip`,"a")}
+    else if(card.value==="reverse"){newDir=pls.length===2?direction:-direction;if(pls.length===2)skip=true;snd("special");addLog(`${player.name} Reverse!`,"a")}
+    else if(card.value==="draw2"){newStack=drawStack+2;snd("special");addLog(`${player.name} +2 (${newStack})`,"a")}
+    else if(card.value==="wild"){snd("special");addLog(`${player.name} Wild -> ${CNAMES[chosenColor]||"?"}`,"a")}
+    else if(card.value==="wild4"){newStack=drawStack+4;snd("special");addLog(`${player.name} +4 -> ${CNAMES[chosenColor]||"?"} (${newStack})`,"a")}
+    else{snd("card");addLog(`${player.name} ${CNAMES[card.color]} ${card.symbol}`)}
+
+    setPlayers(pls);setDiscard(newDiscard);setDeck([...deckCards]);
+    setColor(newColor);setDirection(newDir);setDrawStack(newStack);setDrawnCard(null);
+
+    // Check win
+    if(player.hand.length===0){
+      const won=checkWin(pls,podium,pi);
+      if(won){
+        const rem=pls.filter((_,i)=>![...podium,pi].includes(i));
+        if(rem.length<=1)return;
+        setCurrent(skip?nextActive(pi,newDir,pls,[...podium,pi],1):nextActive(pi,newDir,pls,[...podium,pi]));
+        setTurnTimer(30);return;
+      }
+    }
+    triggerUno(pi,pls);
+    setCurrent(skip?nextActive(pi,newDir,pls,podium,1):nextActive(pi,newDir,pls,podium));
+    setTurnTimer(30);
+  },[players,discardPile,deckCards,activeColor,direction,drawStack,podium,nextActive,checkWin,triggerUno,snd,addLog,spawnFly]);
+
+  // ═══════ MULTI PLAY (shift select) ═══════
+  const playMulti=useCallback((indices,chosenColor=null)=>{
+    if(!indices.length)return;
+    const pls=[...players];const player={...pls[0],hand:[...pls[0].hand]};
+    // Cards in click order (first clicked -> bottom of pile, last -> top)
+    const cards=indices.map(i=>player.hand[i]);
+    // Remove from hand - highest index first to preserve positions
+    const sortedDesc=[...indices].sort((a,b)=>b-a);
+    sortedDesc.forEach(i=>player.hand.splice(i,1));
+    pls[0]=player;
+
+    addLog(`${player.name} ${indices.length}x ${CNAMES[cards[0].color]||""} ${cards[0].symbol}`,"a");
+    snd("card");
+
+    // Fly top card
+    const from=screenPos("b");const to=pilePos();
+    spawnFly(cards[cards.length-1],false,from.x,from.y,to.x,to.y,320);
+
+    const newDiscard=[...discardPile,...cards];
+    const newColor=cards[cards.length-1].color||chosenColor||activeColor;
+
+    setPlayers(pls);setDiscard(newDiscard);setDeck([...deckCards]);
+    setColor(newColor);setDrawnCard(null);setSelected([]);
+
+    if(player.hand.length===0){
+      const won=checkWin(pls,podium,0);
+      if(won){const rem=pls.filter((_,i)=>![...podium,0].includes(i));if(rem.length<=1)return;setCurrent(nextActive(0,direction,pls,[...podium,0]));setTurnTimer(30);return}
+    }
+    triggerUno(0,pls);
+    setCurrent(nextActive(0,direction,pls,podium));setTurnTimer(30);
+  },[players,discardPile,deckCards,activeColor,direction,podium,nextActive,checkWin,triggerUno,snd,addLog,spawnFly]);
+
+  // ═══════ CLICK CARD ═══════
+  const clickCard=useCallback(idx=>{
+    if(phase!=="PLAY"||currentPlayer!==0||aiThinking>=0||podium.includes(0)||dealing)return;
+    const card=players[0].hand[idx];const topCard=discardPile[discardPile.length-1];
+
+    // Shift select mode - only number cards
+    if(shiftHeld){
+      setSelected(prev=>{
+        if(prev.includes(idx))return prev.filter(i=>i!==idx);
+        if(card.type!=="number"){snd("err");return prev}
+        if(!prev.length){
+          if(!canPlay(card,topCard,activeColor,drawStack)){snd("err");return prev}
+          return[idx];
+        }
+        const first=players[0].hand[prev[0]];
+        if(card.value!==first.value||card.type!==first.type){snd("err");return prev}
+        return[...prev,idx];
+      });return;
+    }
+    if(selected.length)setSelected([]);
+    if(!canPlay(card,topCard,activeColor,drawStack)){snd("err");return}
+    if(card.type==="wild"){setColorPicker(idx);return}
+    playCard(0,idx);
+  },[phase,currentPlayer,players,discardPile,activeColor,drawStack,aiThinking,shiftHeld,selected,podium,dealing,playCard,snd]);
+
+  const execMulti=useCallback(()=>{
+    if(!selected.length)return;
+    const first=players[0].hand[selected[0]];
+    if(first.type==="wild"){setColorPicker("multi");return}
+    playMulti(selected);
+  },[selected,players,playMulti]);
+
+  const playDrawnCard=useCallback(()=>{
+    if(!drawnCard)return;
+    const idx=players[0].hand.length-1;
+    if(players[0].hand[idx].type==="wild"){setColorPicker(idx);return}
+    playCard(0,idx);
+  },[drawnCard,players,playCard]);
+
+  const pickColor=useCallback(c=>{
+    if(colorPicker===null)return;
+    if(colorPicker==="multi"){setColorPicker(null);playMulti(selected,c);return}
+    setColorPicker(null);playCard(currentPlayer,colorPicker,c);
+  },[colorPicker,currentPlayer,selected,playCard,playMulti]);
+
+  // ═══════ DRAW ═══════
+  const doDraw=useCallback(()=>{
+    if(phase!=="PLAY"||currentPlayer!==0||aiThinking>=0||podium.includes(0)||dealing)return;
+    setSelected([]);
+    if(drawStack>0){
+      const r=drawCards(drawStack,deckCards,discardPile);
+      const pls=[...players];pls[0]={...pls[0],hand:[...pls[0].hand,...r.drawn]};
+      // Fly each card with stagger
+      const from=deckPos();const to=screenPos("b");
+      r.drawn.forEach((c,i)=>setTimeout(()=>spawnFly(c,false,from.x,from.y,to.x+i*8,to.y,250),i*100));
+      setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);setDrawStack(0);
+      snd("pen");addLog(`${pls[0].name} dobral ${drawStack}`,"p");
+      setCurrent(nextActive(0,direction,pls,podium));setTurnTimer(30);return;
+    }
+    const r=drawCards(1,deckCards,discardPile);if(!r.drawn.length)return;
+    // Fly from deck to hand
+    const from=deckPos();const to=screenPos("b");
+    spawnFly(r.drawn[0],false,from.x,from.y,to.x,to.y,280);
+
+    const card=r.drawn[0];const pls=[...players];
+    pls[0]={...pls[0],hand:[...pls[0].hand,card]};
+    setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);snd("draw");addLog(`${pls[0].name} dobral`);
+    if(canPlay(card,discardPile[discardPile.length-1],activeColor,0))setDrawnCard(card);
+    else{setCurrent(nextActive(0,direction,pls,podium));setTurnTimer(30)}
+  },[phase,currentPlayer,aiThinking,drawStack,deckCards,discardPile,players,activeColor,direction,podium,dealing,drawCards,nextActive,snd,addLog,spawnFly]);
+
+  const passDraw=useCallback(()=>{setDrawnCard(null);setCurrent(nextActive(0,direction,players,podium));setTurnTimer(30)},[direction,players,podium,nextActive]);
+
+  // ═══════ AI TURN ═══════
+  useEffect(()=>{
+    if(phase!=="PLAY"||currentPlayer===0||!players.length||dealing)return;
+    const pl=players[currentPlayer];
+    if(!pl||pl.type!=="ai"||podium.includes(currentPlayer)){
+      if(podium.includes(currentPlayer)){const np=nextActive(currentPlayer,direction,players,podium);if(np!==currentPlayer)setCurrent(np)}return;
+    }
+    setAiThinking(currentPlayer);
+    aiTimer.current=setTimeout(()=>{
+      setAiThinking(-1);const top=discardPile[discardPile.length-1];const hand=pl.hand;
+      // Must draw from stack?
+      if(drawStack>0){
+        const stackable=hand.filter(c=>canPlay(c,top,activeColor,drawStack));
+        if(stackable.length&&aiStk(pl.difficulty)){
+          const c=stackable[0],ci=hand.indexOf(c);
+          if(c.type==="wild")playCard(currentPlayer,ci,aiCol(hand.filter((_,i)=>i!==ci),pl.difficulty));
+          else playCard(currentPlayer,ci);
+        }else{
+          const r=drawCards(drawStack,deckCards,discardPile);
+          const pls=[...players];pls[currentPlayer]={...pls[currentPlayer],hand:[...hand,...r.drawn]};
+          const from=deckPos();const to=screenPos(posKey(currentPlayer,pls.length));
+          r.drawn.forEach((c,i)=>setTimeout(()=>spawnFly(c,true,from.x,from.y,to.x,to.y,250),i*100));
+          setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);setDrawStack(0);
+          snd("pen");addLog(`${pl.name} dobral ${drawStack}`,"p");
+          setCurrent(nextActive(currentPlayer,direction,pls,podium));setTurnTimer(30);
+        }
+        return;
+      }
+      const pick=aiPick(hand,top,activeColor,drawStack,pl.difficulty);
+      if(pick){
+        const ci=hand.indexOf(pick);
+        if(pick.type==="wild")playCard(currentPlayer,ci,aiCol(hand.filter((_,i)=>i!==ci),pl.difficulty));
+        else playCard(currentPlayer,ci);
+      }else{
+        const r=drawCards(1,deckCards,discardPile);
+        if(r.drawn.length){
+          const card=r.drawn[0];const pls=[...players];
+          pls[currentPlayer]={...pls[currentPlayer],hand:[...hand,card]};
+          const from=deckPos();const to=screenPos(posKey(currentPlayer,pls.length));
+          spawnFly(card,true,from.x,from.y,to.x,to.y,280);
+          snd("draw");addLog(`${pl.name} dobral`);
+          if(canPlay(card,top,activeColor,0)){
+            setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);
+            setTimeout(()=>{
+              const nh=pls[currentPlayer].hand,idx=nh.length-1;
+              if(card.type==="wild")playCard(currentPlayer,idx,aiCol(nh.filter((_,i)=>i!==idx),pl.difficulty));
+              else playCard(currentPlayer,idx);
+            },400);return;
+          }
+          setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);
+        }
+        setCurrent(nextActive(currentPlayer,direction,players,podium));setTurnTimer(30);
+      }
+    },800+Math.random()*700);
+    return()=>clearTimeout(aiTimer.current);
+  },[currentPlayer,phase,players,discardPile,activeColor,drawStack,deckCards,direction,podium,dealing,drawCards,nextActive,playCard,snd,addLog,spawnFly]);
+
+  // Turn timer for human
+  useEffect(()=>{
+    if(phase!=="PLAY"||currentPlayer!==0||podium.includes(0)||dealing)return;
+    const iv=setInterval(()=>setTurnTimer(t=>{if(t<=1){clearInterval(iv);doDraw();return 30}return t-1}),1000);
+    return()=>clearInterval(iv);
+  },[phase,currentPlayer,podium,dealing,doDraw]);
+
+  // ═══════ RENDER ═══════
+  const topCard=discardPile[discardPile.length-1];
+  const myHand=players[0]?.hand||[];
+  const myFinished=podium.includes(0);
+  const isMyTurn=phase==="PLAY"&&currentPlayer===0&&aiThinking<0&&!myFinished&&!dealing;
+  const canPlayAny=myHand.some(c=>topCard&&canPlay(c,topCard,activeColor,drawStack));
+  const hasDuplicates=useMemo(()=>{const seen={};for(const c of myHand){if(c.type!=="number")continue;const k=c.value;if(seen[k])return true;seen[k]=true}return false},[myHand]);
+
+  const timerPct=(turnTimer/30)*100;
+  const timerColor=turnTimer>15?"#22C55E":turnTimer>7?"#EAB308":"#EF4444";
+  const unoProgress=unoTarget>=0?unoCountdown/5:0;
+  const unoWaiting=unoPhase==="waiting";
+  const unoJumping=unoPhase==="jumping";
+
+  // ═══════ MENU ═══════
+  if(phase==="MENU")return <div className="app"><style>{CSS}</style><div className="menu">
+    <div className="m-title">UNO</div>
+    <div className="m-panel">
+      <div className="m-lbl">Nazwa</div>
+      <input className="m-inp" value={playerName} onChange={e=>setPlayerName(e.target.value)} placeholder="Imie..." maxLength={16}/>
+      <div className="m-lbl">Gracze</div>
+      <div className="m-opts">{[2,3,4].map(n=><div key={n} className={`m-opt ${numPlayers===n?"act":""}`} onClick={()=>setNumPlayers(n)}>{n}</div>)}</div>
+      <div className="m-lbl">Trudnosc</div>
+      <div className="m-opts">{[["easy","Latwy"],["medium","Sredni"],["hard","Trudny"]].map(([v,l])=><div key={v} className={`m-opt ${difficulty===v?"act":""}`} onClick={()=>setDifficulty(v)}>{l}</div>)}</div>
+      <button className="btn-go" onClick={startGame}>GRA SOLO</button>
+      <button className="btn-mp" onClick={()=>setPhase("MP_MODE")}>MULTIPLAYER</button>
+      <button className="btn-s" style={{width:"100%",marginTop:8}} onClick={()=>setShowRules(true)}>Zasady</button>
+    </div>
+  </div>
+  {showRules&&<div style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setShowRules(false)}>
+    <div style={{background:"rgba(20,20,40,.97)",border:"1px solid rgba(255,255,255,.1)",borderRadius:16,padding:"24px 28px",maxWidth:460,maxHeight:"80vh",overflowY:"auto",color:"rgba(255,255,255,.8)",fontSize:12,lineHeight:1.6}} onClick={e=>e.stopPropagation()}>
+      <h2 style={{fontFamily:"Fredoka",fontSize:24,color:"#EF4444",marginBottom:12}}>Zasady UNO</h2>
+      <p>Pozbadz sie kart! Zagrywaj pasujace kolorem lub wartoscia.</p>
+      <h3 style={{color:"#EAB308",fontSize:14,marginTop:12}}>Karty specjalne</h3>
+      <p>Skip - pomija nastepnego. Reverse - zmiana kierunku. +2/+4 - dobieranie.</p>
+      <h3 style={{color:"#EAB308",fontSize:14,marginTop:12}}>UNO!</h3>
+      <p>Przycisk UNO jest przy wskazniku koloru. Gdy zostanie ci 1 karta - kliknij statyczny przycisk, potem zlap skaczacego! Masz 5 sekund.</p>
+      <h3 style={{color:"#EAB308",fontSize:14,marginTop:12}}>Multi-rzut (Shift)</h3>
+      <p>Shift+klik = zaznacz karty liczbowe o tej samej wartosci. Nie dziala na +2, Skip, Reverse, Wild.</p>
+      <button className="btn-s" onClick={()=>setShowRules(false)}>OK</button>
+    </div>
+  </div>}
+  </div>;
+
+  // ═══════ MP MODE SELECT ═══════
+  if(phase==="MP_MODE")return <div className="app"><style>{CSS}</style><div className="menu">
+    <div className="mp-back" onClick={()=>setPhase("MENU")}>&larr; Wstecz</div>
+    <div className="m-title">UNO</div>
+    <div className="m-panel" style={{minWidth:380}}>
+      <div style={{textAlign:"center",color:"rgba(255,255,255,.6)",fontSize:13,marginBottom:8}}>Multiplayer</div>
+      <div className="m-lbl">Nazwa</div>
+      <input className="m-inp" value={playerName} onChange={e=>setPlayerName(e.target.value)} placeholder="Imie..." maxLength={16}/>
+      <div className="mp-mode-btns">
+        <div className="mp-mode-btn" onClick={()=>setPhase("MP_CREATE")}>
+          <div className="mp-mode-ico">🏠</div>
+          <div className="mp-mode-lbl">Stworz pokoj</div>
+          <div className="mp-mode-sub">Hostuj gre dla znajomych</div>
+        </div>
+        <div className="mp-mode-btn" onClick={()=>setPhase("MP_JOIN")}>
+          <div className="mp-mode-ico">🚪</div>
+          <div className="mp-mode-lbl">Dolacz</div>
+          <div className="mp-mode-sub">Wpisz kod pokoju</div>
+        </div>
+      </div>
+    </div>
+  </div></div>;
+
+  // ═══════ MP CREATE ROOM ═══════
+  if(phase==="MP_CREATE")return <div className="app"><style>{CSS}</style><div className="menu">
+    <div className="mp-back" onClick={()=>setPhase("MP_MODE")}>&larr; Wstecz</div>
+    <div className="m-title" style={{fontSize:52}}>Nowy pokoj</div>
+    <div className="m-panel" style={{minWidth:380}}>
+      <div className="m-lbl">Typ pokoju</div>
+      <div className="m-opts">
+        <div className={`m-opt ${!mpPrivate?"act":""}`} onClick={()=>setMpPrivate(false)}>Publiczny</div>
+        <div className={`m-opt ${mpPrivate?"act":""}`} onClick={()=>setMpPrivate(true)}>Prywatny</div>
+      </div>
+
+      <div className="m-lbl">Max graczy</div>
+      <div className="m-opts">{[2,3,4].map(n=><div key={n} className={`m-opt ${mpRules.maxPlayers===n?"act":""}`} onClick={()=>mpSetRule("maxPlayers",n)}>{n}</div>)}</div>
+
+      <div className="m-lbl">Karty startowe</div>
+      <div className="m-opts">{[5,7,10].map(n=><div key={n} className={`m-opt ${mpRules.startCards===n?"act":""}`} onClick={()=>mpSetRule("startCards",n)}>{n}</div>)}</div>
+
+      <div className="lobby-section">
+        <div className="lobby-section-title">Zasady gry</div>
+        {["multiCard","stackDraw","drawUntilPlay","forcePlay"].map(key=>
+          <div key={key} className="mp-rule">
+            <span className="mp-rule-lbl">{RULE_LABELS[key]}</span>
+            <div className={`mp-toggle ${mpRules[key]?"on":""}`} onClick={()=>mpSetRule(key,!mpRules[key])}/>
+          </div>
+        )}
+        <div className="mp-rule">
+          <span className="mp-rule-lbl">{RULE_LABELS.unoTime}</span>
+          <div className="m-opts" style={{gap:4}}>
+            {[3,5,8].map(n=><div key={n} className={`m-opt ${mpRules.unoTime===n?"act":""}`} style={{padding:"4px 10px",fontSize:12}} onClick={()=>mpSetRule("unoTime",n)}>{n}s</div>)}
+          </div>
+        </div>
+      </div>
+
+      <button className="btn-go" style={{marginTop:20}} onClick={mpCreateRoom} disabled={mpConnecting}>
+        {mpConnecting?<span className="mp-wait"><span className="mp-spin"/>Laczenie P2P...</span>:"STWORZ POKOJ"}
+      </button>
+      {mpError&&<div className="mp-err">{mpError}</div>}
+    </div>
+  </div></div>;
+
+  // ═══════ MP JOIN ═══════
+  if(phase==="MP_JOIN")return <div className="app"><style>{CSS}</style><div className="menu">
+    <div className="mp-back" onClick={()=>setPhase("MP_MODE")}>&larr; Wstecz</div>
+    <div className="m-title" style={{fontSize:52}}>Dolacz</div>
+    <div className="m-panel" style={{minWidth:360}}>
+      <div className="m-lbl">Kod pokoju</div>
+      <input className="m-inp" value={mpJoinCode} onChange={e=>setMpJoinCode(e.target.value.toUpperCase())} placeholder="np. ABC12" maxLength={6} style={{textAlign:"center",fontSize:22,letterSpacing:4,fontFamily:"Fredoka"}}/>
+      {mpError&&<div className="mp-err">{mpError}</div>}
+      <button className="btn-go" style={{marginTop:20}} onClick={mpJoinRoom} disabled={mpConnecting}>
+        {mpConnecting?<span className="mp-wait"><span className="mp-spin"/>Laczenie...</span>:"DOLACZ"}
+      </button>
+    </div>
+  </div></div>;
+
+  // ═══════ MP LOBBY ═══════
+  if(phase==="MP_LOBBY"){
+    const allReady=mpPlayers.length>=2&&mpPlayers.every(p=>p.ready||p.isHost);
+    return <div className="app"><style>{CSS}</style><div className="menu">
+      <div className="mp-back" onClick={toMenu}>&larr; Wyjdz</div>
+      <div className="m-title" style={{fontSize:42}}>Poczekalnia</div>
+      <div className="m-panel" style={{minWidth:400}}>
+        <div style={{textAlign:"center",color:"rgba(255,255,255,.4)",fontSize:11}}>Kod pokoju - wyslij znajomym</div>
+        <div className="lobby-code" onClick={()=>{navigator.clipboard?.writeText(mpRoomCode);setMpError("Skopiowano!");setTimeout(()=>setMpError(""),1500)}} title="Kliknij aby skopiowac" style={{cursor:"pointer"}}>{mpRoomCode}</div>
+        <div style={{textAlign:"center",color:"rgba(34,197,94,.5)",fontSize:10,marginBottom:12}}>&#x2713; P2P polaczenie aktywne</div>
+        <div style={{textAlign:"center",color:"rgba(255,255,255,.3)",fontSize:11,marginBottom:16}}>{mpPrivate?"Prywatny":"Publiczny"} - max {mpRules.maxPlayers} graczy</div>
+
+        <div className="lobby-section">
+          <div className="lobby-section-title">Gracze ({mpPlayers.length}/{mpRules.maxPlayers})</div>
+          {mpPlayers.map((p,i)=><div key={p.id} className="lobby-p">
+            <span style={{fontSize:18}}>{p.emoji}</span>
+            <span className="lobby-p-name">{p.name}{p.id===mpMyId?" (Ty)":""}</span>
+            {p.isHost&&<span className="lobby-p-host">HOST</span>}
+            {!p.isHost&&<span className={`lobby-p-ready ${p.ready?"yes":"no"}`}>{p.ready?"Gotowy":"Czeka"}</span>}
+            {mpIsHost&&!p.isHost&&<span className="lobby-kick" onClick={()=>mpKick(p.id)}>Wyrzuc</span>}
+          </div>)}
+          {mpPlayers.length<mpRules.maxPlayers&&<div className="lobby-p" style={{justifyContent:"center",borderStyle:"dashed",color:"rgba(255,255,255,.3)"}}>
+            Czekam na graczy...
+          </div>}
+        </div>
+
+        {mpIsHost&&<div className="lobby-section">
+          <div className="lobby-section-title">Zasady</div>
+          {["multiCard","stackDraw","drawUntilPlay","forcePlay"].map(key=>
+            <div key={key} className="mp-rule">
+              <span className="mp-rule-lbl">{RULE_LABELS[key]}</span>
+              <div className={`mp-toggle ${mpRules[key]?"on":""}`} onClick={()=>mpSetRule(key,!mpRules[key])}/>
+            </div>
+          )}
+        </div>}
+
+        {!mpIsHost&&<div className="lobby-section">
+          <div className="lobby-section-title">Zasady (ustawione przez hosta)</div>
+          {["multiCard","stackDraw","drawUntilPlay","forcePlay"].map(key=>
+            <div key={key} className="mp-rule">
+              <span className="mp-rule-lbl">{RULE_LABELS[key]}</span>
+              <span style={{color:mpRules[key]?"#22C55E":"#EF4444",fontSize:12}}>{mpRules[key]?"Tak":"Nie"}</span>
+            </div>
+          )}
+        </div>}
+
+        {mpError&&<div className="mp-err" style={mpError==="Skopiowano!"?{color:"#22C55E"}:undefined}>{mpError}</div>}
+
+        {mpIsHost?
+          <button className="btn-go" style={{marginTop:16,opacity:allReady?1:.5}} onClick={mpStartGame}>
+            {allReady?"ROZPOCZNIJ GRE":`Czekam (${mpPlayers.filter(p=>p.ready||p.isHost).length}/${mpPlayers.length})`}
+          </button>
+          :
+          <button className={`btn-s`} style={{width:"100%",marginTop:16,background:mpPlayers.find(p=>p.id===mpMyId)?.ready?"rgba(34,197,94,.2)":"rgba(255,255,255,.08)",borderColor:mpPlayers.find(p=>p.id===mpMyId)?.ready?"rgba(34,197,94,.3)":"rgba(255,255,255,.15)",color:mpPlayers.find(p=>p.id===mpMyId)?.ready?"#22C55E":"rgba(255,255,255,.7)"}} onClick={mpToggleReady}>
+            {mpPlayers.find(p=>p.id===mpMyId)?.ready?"✓ Gotowy":"Kliknij - Gotowy"}
+          </button>
+        }
+      </div>
+    </div></div>;
+  }
+
+  // ═══════ GAME TABLE ═══════
+  return <div className="app"><style>{CSS}</style><div className="table">
+
+    {/* Top bar */}
+    <div className="tbar">
+      <div className="tbar-l">
+        <div className="badge"><span style={{fontSize:16}}>{direction===1?"\u27F3":"\u27F2"}</span><span>{direction===1?"W prawo":"W lewo"}</span></div>
+        <div className="badge">Runda {roundNum}</div>
+        {drawStack>0&&<div className="badge" style={{background:"rgba(239,68,68,.4)",color:"#FCA5A5",fontWeight:700}}>+{drawStack}</div>}
+      </div>
+      <div className="tbar-r">
+        <div className="ibtn" onClick={()=>setSoundOn(!soundOn)}>{soundOn?"\uD83D\uDD0A":"\uD83D\uDD07"}</div>
+        <div className="ibtn" onClick={()=>setLogOpen(!logOpen)}>{"\uD83D\uDCCB"}</div>
+        <div className="ibtn" onClick={toMenu}>{"\u2715"}</div>
+      </div>
+    </div>
+
+    {/* Direction ring */}
+    <div className={`dring ${direction===1?"cw":"ccw"}`}>
+      <svg viewBox="0 0 260 260" fill="none">
+        <circle cx="130" cy="130" r="118" stroke="rgba(255,255,255,.04)" strokeWidth="1" strokeDasharray="6 8"/>
+        <text x="130" y="18" textAnchor="middle" fill="rgba(234,179,8,.18)" fontSize="12">{"\u25BC"}</text>
+        <text x="130" y="250" textAnchor="middle" fill="rgba(234,179,8,.18)" fontSize="12">{"\u25B2"}</text>
+      </svg>
+    </div>
+
+    {/* AI players */}
+    {players.slice(1).map((p,idx)=>{
+      const pi=idx+1;const pos=posKey(pi,players.length);const isV=pos==="l"||pos==="r";
+      const fin=podium.includes(pi);const podIdx=podium.indexOf(pi);
+      return <div key={pi} className={`pa pa-${pos}`}>
+        <div className={`pi ${currentPlayer===pi&&!fin?"act":""} ${fin?"fin":""}`}>
+          <span style={{fontSize:18}}>{p.emoji}</span>
+          <span className="pi-n">{p.name}</span>
+          {fin?<span style={{fontSize:13}}>{MEDALS[podIdx]}</span>:<span className="pi-c">{p.hand.length}</span>}
+          <span className="pi-p">{p.score}pkt</span>
+        </div>
+        {aiThinking===pi&&<div className="think"><div className="think-d"/><div className="think-d"/><div className="think-d"/></div>}
+        {skipEffect===pi&&<div className="skip-eff">{"\u2298"}</div>}
+        {!fin&&<div className={isV?"ai-hv":"ai-h"} style={{marginTop:3}}>
+          {p.hand.slice(0,9).map(c=><div key={c.id} className={isV?"ai-sv":"ai-s"}><Card back sm style={isV?{transform:`rotate(${pos==="l"?90:-90}deg)`}:{}}/></div>)}
+          {p.hand.length>9&&<div style={{color:"rgba(255,255,255,.3)",fontSize:9,padding:2}}>+{p.hand.length-9}</div>}
+        </div>}
+      </div>;
+    })}
+
+    {/* Center */}
+    <div className="center">
+      <div className={`deck ${isMyTurn&&(!canPlayAny||drawStack>0)&&!drawnCard?"deck-draw":""}`} ref={deckRef} onClick={isMyTurn?doDraw:undefined}>
+        {[2,1,0].map(o=><div key={o} className="dk-s" style={{top:-o*2,left:o}}><Card back/></div>)}
+        <div className="dk-n">{deckCards.length} kart</div>
+      </div>
+      <div className="pile" ref={pileRef}>
+        {discardPile.slice(-3).map((c,i,a)=>{const isTop=i===a.length-1;const rot=isTop?0:((c.id*7)%20)-10;
+          return <div key={c.id} className="disc" style={{transform:`rotate(${rot}deg)`,zIndex:i,top:-i,left:i*2}}><Card card={c}/></div>})}
+        {drawStack>0&&<div className="d-stk">+{drawStack}</div>}
+      </div>
+      <div className="col-ind" key={activeColor}>
+        <div className="col-circ" style={{background:COLORS[activeColor]||"#888",boxShadow:`0 0 16px ${COLORS[activeColor]||"#888"}55`}}/>
+        <div className="col-lbl" style={{color:COLORS[activeColor]||"#aaa"}}>{CNAMES[activeColor]||"?"}</div>
+        {/* UNO button - always red, click when waiting to spawn jumper */}
+        {phase==="PLAY"&&!myFinished&&<div className="uno-static">
+          <div className={`uno-pill ${unoWaiting?"active":""}`} onClick={unoWaiting?clickStaticUno:undefined}>UNO</div>
+          {unoWaiting&&<div className="uno-cd"><div className="uno-cd-bar" style={{width:`${unoProgress*100}%`}}/></div>}
+        </div>}
+      </div>
+    </div>
+
+    {/* Flying cards */}
+    {flyCards.map(f=><FlyCard key={f.id} card={f.card} back={f.back} fx={f.fx} fy={f.fy} tx={f.tx} ty={f.ty} dur={f.dur} onDone={()=>setFlyCards(p=>p.filter(x=>x.id!==f.id))}/>)}
+
+    {/* Action buttons */}
+    {isMyTurn&&!canPlayAny&&drawStack===0&&!drawnCard&&!selected.length&&<button className="dbtn" onClick={doDraw}>Dobierz karte</button>}
+    {drawnCard&&currentPlayer===0&&<div className="dbar">
+      <button className="dbtn" style={{position:"relative",transform:"none",left:"auto",bottom:"auto"}} onClick={playDrawnCard}>Zagraj</button>
+      <button className="btn-s" style={{padding:"10px 14px",marginTop:0}} onClick={passDraw}>Pas</button>
+    </div>}
+    {selected.length>0&&<div className="mbar">
+      <span style={{color:"rgba(255,255,255,.7)",fontSize:12}}>Wybrano: <strong style={{color:"#fff"}}>{selected.length}</strong></span>
+      <button className="mbar-play" onClick={execMulti}>Zagraj {selected.length}x</button>
+      <button className="mbar-x" onClick={()=>setSelected([])}>X</button>
+    </div>}
+
+    {/* Player hand */}
+    <div className="pa pa-b">
+      <div className={`pi ${currentPlayer===0&&!myFinished?"act":""} ${myFinished?"fin":""}`}>
+        <span style={{fontSize:18}}>{PEMOJI}</span>
+        <span className="pi-n">{players[0]?.name||"Gracz"}</span>
+        {myFinished?<span style={{fontSize:13}}>{MEDALS[podium.indexOf(0)]}</span>:<span className="pi-c">{myHand.length}</span>}
+        <span className="pi-p">{players[0]?.score||0}pkt</span>
+      </div>
+      {currentPlayer===0&&!myFinished&&<div className="ttimer"><div className="ttimer-bar" style={{width:`${timerPct}%`,background:timerColor}}/></div>}
+      {skipEffect===0&&<div className="skip-eff">{"\u2298"}</div>}
+      <div className="hand"><div className="hand-s">
+        {myHand.map((card,idx)=>{
+          const isPlayable=isMyTurn&&topCard&&canPlay(card,topCard,activeColor,drawStack);
+          const isSel=selected.includes(idx);
+          return <div key={card.id} style={{marginLeft:idx===0?0:-12,zIndex:isSel?99:idx,position:"relative"}}>
+            <Card card={card} play={isPlayable} sel={isSel} cls={`pcd ${myFinished?"cd-fin":""}`} onClick={()=>clickCard(idx)}/>
+          </div>;
+        })}
+      </div></div>
+      {isMyTurn&&hasDuplicates&&!selected.length&&!drawnCard&&<div className="shint">Shift + klik = multi-rzut</div>}
+    </div>
+
+    {/* Log */}
+    {logOpen&&<div className="log">
+      <div className="log-h" onClick={()=>setLogOpen(false)}>Historia <span style={{fontSize:9}}>{"\u2715"}</span></div>
+      <div className="log-body">{logEntries.slice().reverse().map((l,i)=><div key={i} className={`le le-${l.type}`}>{l.msg}</div>)}</div>
+    </div>}
+
+    {/* Color picker */}
+    {colorPicker!==null&&<div className="cp-ov" onClick={()=>setColorPicker(null)}>
+      <div className="cp-grid" onClick={e=>e.stopPropagation()}>
+        <div className="cp-title">Wybierz kolor</div>
+        {Object.entries(COLORS).map(([c,hex])=><div key={c} className="cp-btn" style={{background:hex,"--bc":hex}} onClick={()=>pickColor(c)}/>)}
+      </div>
+    </div>}
+
+    {/* Jumping UNO button */}
+    {unoJumping&&<div className="uno-jump" style={{left:`${unoPos.x}%`,top:`${unoPos.y}%`,transform:"translate(-50%,-50%)"}}>
+      <button className="uno-jump-btn" onClick={clickJumpingUno}>UNO!</button>
+    </div>}
+    {unoFlash&&<div className="uno-flash">UNO!</div>}
+    {confetti&&<Confetti/>}
+
+    {/* Dealing overlay */}
+    {dealing&&<div className="deal-ov"><div className="deal-txt">Rozdawanie...</div></div>}
+
+    {/* Round end */}
+    {(phase==="END"||phase==="OVER")&&<div className="re-ov"><div className="re-panel">
+      <div className="re-t">{phase==="OVER"?"Koniec gry!":"Koniec rundy!"}</div>
+      <div className="re-sub">Podium</div>
+      {podium.map((pi,i)=>{const p=players[pi];if(!p)return null;
+        return <div key={pi} className={`pod-row ${i===0?"gold":i===1?"silver":i===2?"bronze":""}`}>
+          <div className="pod-m">{MEDALS[i]}</div><div className="pod-n">{p.emoji} {p.name}</div><div className="pod-pts">{p.score}pkt</div>
+        </div>})}
+      <div style={{marginTop:10}}>
+        {phase==="END"&&<button className="btn-n" onClick={nextRound}>Nastepna runda</button>}
+        <button className="btn-s" onClick={toMenu}>{phase==="OVER"?"Nowa gra":"Menu"}</button>
+      </div>
+    </div></div>}
+
+  </div></div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(UnoGame));
+</script>
+</body>
+</html>
