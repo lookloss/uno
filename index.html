@@ -358,6 +358,9 @@ function UnoGame(){
   const connsRef=useRef([]);         // host: array of DataConnections to clients
   const hostConnRef=useRef(null);    // client: DataConnection to host
   const mpPlayersRef=useRef([]);     // live ref for lobby broadcasts
+  const mpPlayerMapRef=useRef({});   // host: peerId -> game player index
+  const mpGameRef=useRef(false);     // true when in MP game (not solo)
+  const stateVerRef=useRef(0);       // state version counter for broadcasts
   useEffect(()=>{mpPlayersRef.current=mpPlayers},[mpPlayers]);
 
   // Shift key tracking
@@ -469,7 +472,7 @@ function UnoGame(){
     if(hostConnRef.current){hostConnRef.current.close();hostConnRef.current=null}
     if(peerRef.current){peerRef.current.destroy();peerRef.current=null}
   },[]);
-  const toMenu=useCallback(()=>{setConfetti(false);setPhase("MENU");setPlayers([]);setRoundNum(1);clearTimeout(unoTimer.current);clearTimeout(aiTimer.current);mpCleanup()},[mpCleanup]);
+  const toMenu=useCallback(()=>{setConfetti(false);setPhase("MENU");setPlayers([]);setRoundNum(1);clearTimeout(unoTimer.current);clearTimeout(aiTimer.current);mpGameRef.current=false;mpCleanup()},[mpCleanup]);
 
   // ═══════ MULTIPLAYER NETWORKING (PeerJS P2P) ═══════
   const PEER_PREFIX="UNOG-";
@@ -502,6 +505,28 @@ function UnoGame(){
         setMpPlayers(np);mpPlayersRef.current=np;
         mpBroadcastLobby(np);
       }
+      // ── GAME ACTIONS from clients ──
+      else if(msg.t==="play"){
+        const pi=mpPlayerMapRef.current[connId];
+        if(pi===undefined)return;
+        // Store action for the game loop to pick up
+        window._mpAction={type:"play",pi,cardIdx:msg.cardIdx,color:msg.color||null};
+      }
+      else if(msg.t==="draw"){
+        const pi=mpPlayerMapRef.current[connId];
+        if(pi===undefined)return;
+        window._mpAction={type:"draw",pi};
+      }
+      else if(msg.t==="pass"){
+        const pi=mpPlayerMapRef.current[connId];
+        if(pi===undefined)return;
+        window._mpAction={type:"pass",pi};
+      }
+      else if(msg.t==="play_drawn"){
+        const pi=mpPlayerMapRef.current[connId];
+        if(pi===undefined)return;
+        window._mpAction={type:"play_drawn",pi,color:msg.color||null};
+      }
     }catch(e){console.error("host msg err",e)}
   },[mpBroadcast,mpBroadcastLobby]);
 
@@ -517,10 +542,31 @@ function UnoGame(){
         setMpError("Zostales wyrzucony z pokoju");mpCleanup();setPhase("MP_MODE");
       }
       else if(msg.t==="error"){setMpError(msg.msg||"Blad")}
-      else if(msg.t==="start_game"){
-        // Host sent game start signal - start local game with these players as AI stand-ins
-        // In full MP this would be state sync, for now AI placeholders
-        setPhase("PLAY");
+      // ── GAME STATE from host ──
+      else if(msg.t==="game_state"){
+        // Host sends rotated state so client is always player 0
+        const s=msg;
+        const pls=s.players.map(p=>({
+          name:p.name,emoji:p.emoji,type:p.isMe?"human":"remote",
+          difficulty:"medium",hand:p.hand||[],score:p.score||0
+        }));
+        setPlayers(pls);
+        setDeck(new Array(s.deckCount||0).fill(null));
+        setDiscard(s.discard||[]);
+        setCurrent(s.currentPlayer);
+        setDirection(s.direction);
+        setColor(s.activeColor);
+        setDrawStack(s.drawStack);
+        setLog(s.log||[]);
+        setPodium(s.podium||[]);
+        setDrawnCard(s.drawnCard||null);
+        setTurnTimer(s.turnTimer||30);
+        setDealing(false);
+        setAiThinking(-1);
+        setRoundNum(s.roundNum||1);
+        if(s.phase)setPhase(s.phase);
+        if(s.confetti)setConfetti(true);
+        if(s.unoTarget!==undefined){setUnoTarget(s.unoTarget);setUnoPhase(s.unoPhase||"idle")}
       }
     }catch(e){console.error("client msg err",e)}
   },[mpCleanup]);
@@ -643,38 +689,143 @@ function UnoGame(){
     });
   },[mpIsHost,mpBroadcast]);
 
-  // Start multiplayer game (host) - for now uses AI stand-ins for remote players
+  // Host: broadcast game state to all clients (rotated per-client view)
+  const mpBroadcastGameState=useCallback((pls,dk,disc,cur,dir,col,ds,lg,pod,dt,ph,rn,conf,ut,up)=>{
+    if(!connsRef.current.length)return;
+    const n=pls.length;
+    connsRef.current.forEach(conn=>{
+      const pi=mpPlayerMapRef.current[conn.peer];
+      if(pi===undefined||!conn.open)return;
+      // Rotate so this client is player 0
+      const rot=i=>(i-pi+n+n)%n;
+      const rotPlayers=[];
+      for(let i=0;i<n;i++){
+        const srcI=(pi+i)%n;const p=pls[srcI];
+        rotPlayers.push({
+          name:p.name,emoji:p.emoji,score:p.score||0,isMe:srcI===pi,
+          hand:srcI===pi?p.hand:p.hand.map(()=>({id:0,color:"back",type:"back",value:"",symbol:""})),
+          handCount:p.hand.length
+        });
+      }
+      const state={
+        t:"game_state",
+        players:rotPlayers,
+        deckCount:dk.length,
+        discard:disc.slice(-3),
+        currentPlayer:rot(cur),
+        direction:dir,activeColor:col,drawStack:ds,
+        log:(lg||[]).slice(-15),
+        podium:(pod||[]).map(rot),
+        drawnCard:cur===pi?dt:null,
+        turnTimer:30,
+        phase:ph,roundNum:rn,confetti:conf||false,
+        unoTarget:ut>=0?rot(ut):-1,unoPhase:up||"idle"
+      };
+      conn.send(JSON.stringify(state));
+    });
+  },[]);
+
+  // Start multiplayer game (host)
   const mpStartGame=useCallback(()=>{
     if(!mpIsHost||mpPlayers.length<2)return;
     if(!mpPlayers.every(p=>p.ready||p.isHost)){setMpError("Nie wszyscy gotowi!");return}
-    mpBroadcast({t:"start_game"});
 
-    // Start game locally with MP players (AI placeholders for remote)
+    // Build player map: peerId -> game index
+    const pmap={};
+    mpPlayers.forEach((mp,i)=>{pmap[mp.id]=i});
+    mpPlayerMapRef.current=pmap;
+    mpGameRef.current=true;
+
     cid=0;let deck=shuf(mkDeck());
-    const pls=mpPlayers.map((mp,i)=>({name:mp.name,emoji:mp.emoji,type:i===0?"human":"ai",difficulty:"medium",hand:[],score:0}));
+    const pls=mpPlayers.map((mp,i)=>({
+      name:mp.name,emoji:mp.emoji,
+      type:i===0?"human":"remote",  // host=human, others=remote
+      difficulty:"medium",hand:[],score:0
+    }));
     const dealQueue=[];
     for(let c=0;c<mpRules.startCards;c++)for(let i=0;i<pls.length;i++)dealQueue.push({pi:i,card:deck.pop()});
     let first=deck.pop();
     while(first.type!=="number"){deck.unshift(first);deck=shuf(deck);first=deck.pop()}
     const startPlayer=Math.floor(Math.random()*pls.length);
+
+    // Deal all cards immediately (no animation for simplicity in MP)
+    dealQueue.forEach(({pi,card})=>pls[pi].hand.push(card));
+
     setPlayers(pls);setDeck(deck);setDiscard([first]);setColor(first.color);
     setCurrent(startPlayer);setDirection(1);setDrawStack(0);
     setLog([]);setPodium([]);setDrawnCard(null);setUnoTarget(-1);setUnoPhase("idle");
     setAiThinking(-1);setTurnTimer(30);setSelected([]);setFlyCards([]);
-    setPhase("PLAY");setDealing(true);
+    setPhase("PLAY");setDealing(false);
+    const lg=[{msg:`Multiplayer - ${pls[startPlayer].name} zaczyna!`,type:"a"}];
+    setLog(lg);
     addLog(`Multiplayer - ${pls[startPlayer].name} zaczyna!`,"a");
-    let idx=0;
-    const dealNext=()=>{
-      if(idx>=dealQueue.length){setDealing(false);return}
-      const{pi,card}=dealQueue[idx];
-      const from=deckPos();const to=screenPos(posKey(pi,pls.length));
-      spawnFly(card,pi!==0,from.x,from.y,to.x,to.y,220);
-      snd("deal");
-      setPlayers(prev=>prev.map((p,i)=>i===pi?{...p,hand:[...p.hand,card]}:p));
-      idx++;setTimeout(dealNext,75);
-    };
-    setTimeout(dealNext,350);
-  },[mpIsHost,mpPlayers,mpRules,mpBroadcast,addLog,snd,spawnFly]);
+
+    // Broadcast initial state to all clients
+    setTimeout(()=>{
+      mpBroadcastGameState(pls,deck,[first],startPlayer,1,first.color,0,lg,[],null,"PLAY",1,false,-1,"idle");
+    },300);
+  },[mpIsHost,mpPlayers,mpRules,addLog,mpBroadcastGameState]);
+
+  // Host: auto-broadcast game state when key state changes
+  useEffect(()=>{
+    if(!mpIsHost||!mpGameRef.current||phase!=="PLAY"||!connsRef.current.length)return;
+    const ver=++stateVerRef.current;
+    const tid=setTimeout(()=>{
+      if(stateVerRef.current!==ver)return; // debounce
+      mpBroadcastGameState(players,deckCards,discardPile,currentPlayer,direction,activeColor,drawStack,logEntries,podium,drawnCard,phase,roundNum,confetti,unoTarget,unoPhase);
+    },100);
+    return()=>clearTimeout(tid);
+  },[mpIsHost,phase,players,currentPlayer,discardPile,activeColor,drawStack,direction,podium,drawnCard,logEntries,deckCards,roundNum,confetti,unoTarget,unoPhase,mpBroadcastGameState]);
+
+  // Host: poll for remote player actions
+  useEffect(()=>{
+    if(!mpIsHost||!mpGameRef.current||phase!=="PLAY")return;
+    const iv=setInterval(()=>{
+      const act=window._mpAction;
+      if(!act)return;
+      window._mpAction=null;
+      const pi=act.pi;
+      if(pi!==currentPlayer)return; // not their turn
+      const pl=players[pi];
+      if(!pl||pl.type!=="remote")return;
+
+      if(act.type==="play"){
+        const card=pl.hand[act.cardIdx];
+        if(!card)return;
+        if(card.type==="wild")playCard(pi,act.cardIdx,act.color);
+        else playCard(pi,act.cardIdx);
+      }
+      else if(act.type==="draw"){
+        // Draw for remote player
+        if(drawStack>0){
+          const r=drawCards(drawStack,deckCards,discardPile);
+          const pls=[...players];pls[pi]={...pls[pi],hand:[...pls[pi].hand,...r.drawn]};
+          setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);setDrawStack(0);
+          snd("pen");addLog(`${pl.name} dobral ${drawStack}`,"p");
+          setCurrent(nextActive(pi,direction,pls,podium));setTurnTimer(30);
+        }else{
+          const r=drawCards(1,deckCards,discardPile);if(!r.drawn.length)return;
+          const card=r.drawn[0];const pls=[...players];
+          pls[pi]={...pls[pi],hand:[...pls[pi].hand,card]};
+          setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);snd("draw");addLog(`${pl.name} dobral`);
+          const top=discardPile[discardPile.length-1];
+          if(canPlay(card,top,activeColor,0))setDrawnCard(card);
+          else{setCurrent(nextActive(pi,direction,pls,podium));setTurnTimer(30)}
+        }
+      }
+      else if(act.type==="pass"){
+        setDrawnCard(null);
+        setCurrent(nextActive(pi,direction,players,podium));setTurnTimer(30);
+      }
+      else if(act.type==="play_drawn"){
+        const idx=pl.hand.length-1;
+        const card=pl.hand[idx];
+        if(card&&card.type==="wild")playCard(pi,idx,act.color);
+        else if(card)playCard(pi,idx);
+      }
+    },50);
+    return()=>clearInterval(iv);
+  },[mpIsHost,phase,currentPlayer,players,deckCards,discardPile,activeColor,drawStack,direction,podium,playCard,drawCards,nextActive,snd,addLog]);
 
   // ═══════ WIN CHECK ═══════
   const checkWin=useCallback((pls,pod,pi)=>{
@@ -697,7 +848,7 @@ function UnoGame(){
   // ═══════ UNO TRIGGER ═══════
   const triggerUno=useCallback((pi,pls)=>{
     if(pls[pi].hand.length!==1)return;
-    if(pls[pi].type==="ai"){
+    if(pls[pi].type==="ai"||pls[pi].type==="remote"){
       setTimeout(()=>{setUnoFlash(true);snd("uno");addLog(`${pls[pi].name} UNO!`,"u");setTimeout(()=>setUnoFlash(false),1000)},300+Math.random()*500);
     }else{
       setUnoTarget(pi);setUnoPhase("waiting");setUnoCountdown(5);
@@ -808,12 +959,17 @@ function UnoGame(){
   },[players,discardPile,deckCards,activeColor,direction,podium,nextActive,checkWin,triggerUno,snd,addLog,spawnFly]);
 
   // ═══════ CLICK CARD ═══════
+  const sendToHost=useCallback((msg)=>{
+    if(hostConnRef.current?.open)hostConnRef.current.send(JSON.stringify(msg));
+  },[]);
+  const isClient=useCallback(()=>mpGameRef.current&&!mpIsHost,[mpIsHost]);
+
   const clickCard=useCallback(idx=>{
     if(phase!=="PLAY"||currentPlayer!==0||aiThinking>=0||podium.includes(0)||dealing)return;
     const card=players[0].hand[idx];const topCard=discardPile[discardPile.length-1];
 
-    // Shift select mode - only number cards
-    if(shiftHeld){
+    // Shift select mode - only number cards (disabled for MP clients for simplicity)
+    if(shiftHeld&&!isClient()){
       setSelected(prev=>{
         if(prev.includes(idx))return prev.filter(i=>i!==idx);
         if(card.type!=="number"){snd("err");return prev}
@@ -829,8 +985,9 @@ function UnoGame(){
     if(selected.length)setSelected([]);
     if(!canPlay(card,topCard,activeColor,drawStack)){snd("err");return}
     if(card.type==="wild"){setColorPicker(idx);return}
+    if(isClient()){sendToHost({t:"play",cardIdx:idx});return}
     playCard(0,idx);
-  },[phase,currentPlayer,players,discardPile,activeColor,drawStack,aiThinking,shiftHeld,selected,podium,dealing,playCard,snd]);
+  },[phase,currentPlayer,players,discardPile,activeColor,drawStack,aiThinking,shiftHeld,selected,podium,dealing,playCard,snd,isClient,sendToHost]);
 
   const execMulti=useCallback(()=>{
     if(!selected.length)return;
@@ -841,25 +998,35 @@ function UnoGame(){
 
   const playDrawnCard=useCallback(()=>{
     if(!drawnCard)return;
+    if(isClient()){
+      const idx=players[0].hand.length-1;
+      const card=players[0].hand[idx];
+      if(card?.type==="wild"){setColorPicker("drawn_remote");return}
+      sendToHost({t:"play_drawn"});return;
+    }
     const idx=players[0].hand.length-1;
     if(players[0].hand[idx].type==="wild"){setColorPicker(idx);return}
     playCard(0,idx);
-  },[drawnCard,players,playCard]);
+  },[drawnCard,players,playCard,isClient,sendToHost]);
 
   const pickColor=useCallback(c=>{
     if(colorPicker===null)return;
+    if(isClient()){
+      if(colorPicker==="drawn_remote"){setColorPicker(null);sendToHost({t:"play_drawn",color:c});return}
+      setColorPicker(null);sendToHost({t:"play",cardIdx:colorPicker,color:c});return;
+    }
     if(colorPicker==="multi"){setColorPicker(null);playMulti(selected,c);return}
     setColorPicker(null);playCard(currentPlayer,colorPicker,c);
-  },[colorPicker,currentPlayer,selected,playCard,playMulti]);
+  },[colorPicker,currentPlayer,selected,playCard,playMulti,isClient,sendToHost]);
 
   // ═══════ DRAW ═══════
   const doDraw=useCallback(()=>{
     if(phase!=="PLAY"||currentPlayer!==0||aiThinking>=0||podium.includes(0)||dealing)return;
+    if(isClient()){sendToHost({t:"draw"});return}
     setSelected([]);
     if(drawStack>0){
       const r=drawCards(drawStack,deckCards,discardPile);
       const pls=[...players];pls[0]={...pls[0],hand:[...pls[0].hand,...r.drawn]};
-      // Fly each card with stagger
       const from=deckPos();const to=screenPos("b");
       r.drawn.forEach((c,i)=>setTimeout(()=>spawnFly(c,false,from.x,from.y,to.x+i*8,to.y,250),i*100));
       setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);setDrawStack(0);
@@ -867,18 +1034,19 @@ function UnoGame(){
       setCurrent(nextActive(0,direction,pls,podium));setTurnTimer(30);return;
     }
     const r=drawCards(1,deckCards,discardPile);if(!r.drawn.length)return;
-    // Fly from deck to hand
     const from=deckPos();const to=screenPos("b");
     spawnFly(r.drawn[0],false,from.x,from.y,to.x,to.y,280);
-
     const card=r.drawn[0];const pls=[...players];
     pls[0]={...pls[0],hand:[...pls[0].hand,card]};
     setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);snd("draw");addLog(`${pls[0].name} dobral`);
     if(canPlay(card,discardPile[discardPile.length-1],activeColor,0))setDrawnCard(card);
     else{setCurrent(nextActive(0,direction,pls,podium));setTurnTimer(30)}
-  },[phase,currentPlayer,aiThinking,drawStack,deckCards,discardPile,players,activeColor,direction,podium,dealing,drawCards,nextActive,snd,addLog,spawnFly]);
+  },[phase,currentPlayer,aiThinking,drawStack,deckCards,discardPile,players,activeColor,direction,podium,dealing,drawCards,nextActive,snd,addLog,spawnFly,isClient,sendToHost]);
 
-  const passDraw=useCallback(()=>{setDrawnCard(null);setCurrent(nextActive(0,direction,players,podium));setTurnTimer(30)},[direction,players,podium,nextActive]);
+  const passDraw=useCallback(()=>{
+    if(isClient()){sendToHost({t:"pass"});setDrawnCard(null);return}
+    setDrawnCard(null);setCurrent(nextActive(0,direction,players,podium));setTurnTimer(30);
+  },[direction,players,podium,nextActive,isClient,sendToHost]);
 
   // ═══════ AI TURN ═══════
   useEffect(()=>{
@@ -937,12 +1105,45 @@ function UnoGame(){
     return()=>clearTimeout(aiTimer.current);
   },[currentPlayer,phase,players,discardPile,activeColor,drawStack,deckCards,direction,podium,dealing,drawCards,nextActive,playCard,snd,addLog,spawnFly]);
 
-  // Turn timer for human
+  // Turn timer for human (host only in MP, always in solo)
   useEffect(()=>{
     if(phase!=="PLAY"||currentPlayer!==0||podium.includes(0)||dealing)return;
+    if(mpGameRef.current&&!mpIsHost)return; // client: timer managed by host
     const iv=setInterval(()=>setTurnTimer(t=>{if(t<=1){clearInterval(iv);doDraw();return 30}return t-1}),1000);
     return()=>clearInterval(iv);
-  },[phase,currentPlayer,podium,dealing,doDraw]);
+  },[phase,currentPlayer,podium,dealing,doDraw,mpIsHost]);
+
+  // Host: timeout for remote players (30s)
+  useEffect(()=>{
+    if(!mpIsHost||!mpGameRef.current||phase!=="PLAY"||!players.length||dealing)return;
+    const pl=players[currentPlayer];
+    if(!pl||pl.type!=="remote"||podium.includes(currentPlayer))return;
+    setTurnTimer(30);
+    const iv=setInterval(()=>setTurnTimer(t=>{
+      if(t<=1){
+        clearInterval(iv);
+        // Auto-draw for remote player
+        if(drawStack>0){
+          const r=drawCards(drawStack,deckCards,discardPile);
+          const pls=[...players];pls[currentPlayer]={...pls[currentPlayer],hand:[...pls[currentPlayer].hand,...r.drawn]};
+          setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);setDrawStack(0);
+          addLog(`${pl.name} - czas minal, dobral ${drawStack}`,"p");
+          setCurrent(nextActive(currentPlayer,direction,pls,podium));
+        }else{
+          const r=drawCards(1,deckCards,discardPile);
+          if(r.drawn.length){
+            const pls=[...players];pls[currentPlayer]={...pls[currentPlayer],hand:[...pls[currentPlayer].hand,...r.drawn]};
+            setPlayers(pls);setDeck(r.deck);setDiscard(r.disc);
+            addLog(`${pl.name} - czas minal, dobral`,"p");
+          }
+          setCurrent(nextActive(currentPlayer,direction,players,podium));
+        }
+        return 30;
+      }
+      return t-1;
+    }),1000);
+    return()=>clearInterval(iv);
+  },[mpIsHost,phase,currentPlayer,players,dealing,podium,drawStack,deckCards,discardPile,direction,drawCards,nextActive,addLog]);
 
   // ═══════ RENDER ═══════
   const topCard=discardPile[discardPile.length-1];
