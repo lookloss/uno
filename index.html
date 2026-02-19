@@ -361,6 +361,9 @@ function UnoGame(){
   const mpPlayerMapRef=useRef({});   // host: peerId -> game player index
   const mpGameRef=useRef(false);     // true when in MP game (not solo)
   const stateVerRef=useRef(0);       // state version counter for broadcasts
+  const mpActionRef=useRef(null);    // pending remote action
+  const processingRef=useRef(false); // prevent double-actions
+  const[pendingPile,setPendingPile]=useState(null); // delayed discard card
   useEffect(()=>{mpPlayersRef.current=mpPlayers},[mpPlayers]);
 
   // Shift key tracking
@@ -425,6 +428,7 @@ function UnoGame(){
 
   // ═══════ START GAME ═══════
   const startGame=useCallback(()=>{
+    mpGameRef.current=false; // ensure solo mode
     cid=0;let deck=shuf(mkDeck());
     const name=playerName.trim()||"Gracz";
     const pls=[{name,emoji:PEMOJI,type:"human",hand:[],score:0}];
@@ -509,23 +513,22 @@ function UnoGame(){
       else if(msg.t==="play"){
         const pi=mpPlayerMapRef.current[connId];
         if(pi===undefined)return;
-        // Store action for the game loop to pick up
-        window._mpAction={type:"play",pi,cardIdx:msg.cardIdx,color:msg.color||null};
+        mpActionRef.current={type:"play",pi,cardIdx:msg.cardIdx,color:msg.color||null};
       }
       else if(msg.t==="draw"){
         const pi=mpPlayerMapRef.current[connId];
         if(pi===undefined)return;
-        window._mpAction={type:"draw",pi};
+        mpActionRef.current={type:"draw",pi};
       }
       else if(msg.t==="pass"){
         const pi=mpPlayerMapRef.current[connId];
         if(pi===undefined)return;
-        window._mpAction={type:"pass",pi};
+        mpActionRef.current={type:"pass",pi};
       }
       else if(msg.t==="play_drawn"){
         const pi=mpPlayerMapRef.current[connId];
         if(pi===undefined)return;
-        window._mpAction={type:"play_drawn",pi,color:msg.color||null};
+        mpActionRef.current={type:"play_drawn",pi,color:msg.color||null};
       }
     }catch(e){console.error("host msg err",e)}
   },[mpBroadcast,mpBroadcastLobby]);
@@ -544,11 +547,11 @@ function UnoGame(){
       else if(msg.t==="error"){setMpError(msg.msg||"Blad")}
       // ── GAME STATE from host ──
       else if(msg.t==="game_state"){
-        // Host sends rotated state so client is always player 0
+        mpGameRef.current=true; // CRITICAL: mark as MP game for client
         const s=msg;
         const pls=s.players.map(p=>({
           name:p.name,emoji:p.emoji,type:p.isMe?"human":"remote",
-          difficulty:"medium",hand:p.hand||[],score:p.score||0
+          difficulty:"medium",hand:p.hand||[],score:p.score||0,handCount:p.handCount||0
         }));
         setPlayers(pls);
         setDeck(new Array(s.deckCount||0).fill(null));
@@ -564,6 +567,7 @@ function UnoGame(){
         setDealing(false);
         setAiThinking(-1);
         setRoundNum(s.roundNum||1);
+        processingRef.current=false;
         if(s.phase)setPhase(s.phase);
         if(s.confetti)setConfetti(true);
         if(s.unoTarget!==undefined){setUnoTarget(s.unoTarget);setUnoPhase(s.unoPhase||"idle")}
@@ -601,9 +605,19 @@ function UnoGame(){
         conn.on("data",(d)=>mpHostHandleMsg(d,conn.peer));
         conn.on("close",()=>{
           connsRef.current=connsRef.current.filter(c=>c.peer!==conn.peer);
-          const np=mpPlayersRef.current.filter(p=>p.id!==conn.peer);
-          setMpPlayers(np);mpPlayersRef.current=np;
-          mpBroadcastLobby(np);
+          if(mpGameRef.current){
+            // During game: replace disconnected player with AI
+            const pi=mpPlayerMapRef.current[conn.peer];
+            if(pi!==undefined){
+              setPlayers(prev=>prev.map((p,i)=>i===pi?{...p,type:"ai",name:p.name+" (bot)"}:p));
+              addLog(`${conn.peer.split('-')[0]||"Gracz"} rozlaczony - zastapiony botem`,"p");
+            }
+          }else{
+            // In lobby: remove player
+            const np=mpPlayersRef.current.filter(p=>p.id!==conn.peer);
+            setMpPlayers(np);mpPlayersRef.current=np;
+            mpBroadcastLobby(np);
+          }
         });
       });
     });
@@ -768,7 +782,8 @@ function UnoGame(){
 
   // Host: auto-broadcast game state when key state changes
   useEffect(()=>{
-    if(!mpIsHost||!mpGameRef.current||phase!=="PLAY"||!connsRef.current.length)return;
+    if(!mpIsHost||!mpGameRef.current||!connsRef.current.length)return;
+    if(phase!=="PLAY"&&phase!=="END"&&phase!=="OVER")return;
     const ver=++stateVerRef.current;
     const tid=setTimeout(()=>{
       if(stateVerRef.current!==ver)return; // debounce
@@ -781,9 +796,9 @@ function UnoGame(){
   useEffect(()=>{
     if(!mpIsHost||!mpGameRef.current||phase!=="PLAY")return;
     const iv=setInterval(()=>{
-      const act=window._mpAction;
+      const act=mpActionRef.current;
       if(!act)return;
-      window._mpAction=null;
+      mpActionRef.current=null;
       const pi=act.pi;
       if(pi!==currentPlayer)return; // not their turn
       const pl=players[pi];
@@ -792,11 +807,12 @@ function UnoGame(){
       if(act.type==="play"){
         const card=pl.hand[act.cardIdx];
         if(!card)return;
+        const top=discardPile[discardPile.length-1];
+        if(top&&!canPlay(card,top,activeColor,drawStack))return; // validate play
         if(card.type==="wild")playCard(pi,act.cardIdx,act.color);
         else playCard(pi,act.cardIdx);
       }
       else if(act.type==="draw"){
-        // Draw for remote player
         if(drawStack>0){
           const r=drawCards(drawStack,deckCards,discardPile);
           const pls=[...players];pls[pi]={...pls[pi],hand:[...pls[pi].hand,...r.drawn]};
@@ -823,7 +839,7 @@ function UnoGame(){
         if(card&&card.type==="wild")playCard(pi,idx,act.color);
         else if(card)playCard(pi,idx);
       }
-    },50);
+    },80);
     return()=>clearInterval(iv);
   },[mpIsHost,phase,currentPlayer,players,deckCards,discardPile,activeColor,drawStack,direction,podium,playCard,drawCards,nextActive,snd,addLog]);
 
@@ -888,8 +904,18 @@ function UnoGame(){
 
   // ═══════ PLAY CARD ═══════
   const playCard=useCallback((pi,cardIdx,chosenColor=null)=>{
+    if(processingRef.current)return;
+    processingRef.current=true;
+
     const pls=[...players];const player={...pls[pi],hand:[...pls[pi].hand]};
     const card=player.hand[cardIdx];
+    if(!card){processingRef.current=false;return}
+
+    // UNO enforcement: if player has 1 card and is UNO target, block play
+    if(player.hand.length===1&&unoTarget===pi&&unoPhase!=="idle"){
+      snd("err");processingRef.current=false;return;
+    }
+
     player.hand.splice(cardIdx,1);pls[pi]=player;
 
     // Fly animation
@@ -900,16 +926,20 @@ function UnoGame(){
     const newDiscard=[...discardPile,card];
     let newColor=card.color||chosenColor||activeColor;
     let newDir=direction,newStack=0,skip=false;
+    const activePls=pls.filter((_,i)=>!podium.includes(i)).length;
 
     if(card.value==="skip"){skip=true;snd("special");setSkipEffect(nextActive(pi,direction,pls,podium));setTimeout(()=>setSkipEffect(null),1000);addLog(`${player.name} Skip`,"a")}
-    else if(card.value==="reverse"){newDir=pls.length===2?direction:-direction;if(pls.length===2)skip=true;snd("special");addLog(`${player.name} Reverse!`,"a")}
+    else if(card.value==="reverse"){newDir=activePls<=2?direction:-direction;if(activePls<=2)skip=true;snd("special");addLog(`${player.name} Reverse!`,"a")}
     else if(card.value==="draw2"){newStack=drawStack+2;snd("special");addLog(`${player.name} +2 (${newStack})`,"a")}
     else if(card.value==="wild"){snd("special");addLog(`${player.name} Wild -> ${CNAMES[chosenColor]||"?"}`,"a")}
     else if(card.value==="wild4"){newStack=drawStack+4;snd("special");addLog(`${player.name} +4 -> ${CNAMES[chosenColor]||"?"} (${newStack})`,"a")}
     else{snd("card");addLog(`${player.name} ${CNAMES[card.color]} ${card.symbol}`)}
 
+    // Update state - pendingPile delays visual top card during fly animation
     setPlayers(pls);setDiscard(newDiscard);setDeck([...deckCards]);
     setColor(newColor);setDirection(newDir);setDrawStack(newStack);setDrawnCard(null);
+    setPendingPile(true);
+    setTimeout(()=>{setPendingPile(null);processingRef.current=false},300);
 
     // Check win
     if(player.hand.length===0){
@@ -924,7 +954,7 @@ function UnoGame(){
     triggerUno(pi,pls);
     setCurrent(skip?nextActive(pi,newDir,pls,podium,1):nextActive(pi,newDir,pls,podium));
     setTurnTimer(30);
-  },[players,discardPile,deckCards,activeColor,direction,drawStack,podium,nextActive,checkWin,triggerUno,snd,addLog,spawnFly]);
+  },[players,discardPile,deckCards,activeColor,direction,drawStack,podium,unoTarget,unoPhase,nextActive,checkWin,triggerUno,snd,addLog,spawnFly]);
 
   // ═══════ MULTI PLAY (shift select) ═══════
   const playMulti=useCallback((indices,chosenColor=null)=>{
@@ -965,7 +995,7 @@ function UnoGame(){
   const isClient=useCallback(()=>mpGameRef.current&&!mpIsHost,[mpIsHost]);
 
   const clickCard=useCallback(idx=>{
-    if(phase!=="PLAY"||currentPlayer!==0||aiThinking>=0||podium.includes(0)||dealing)return;
+    if(phase!=="PLAY"||currentPlayer!==0||aiThinking>=0||podium.includes(0)||dealing||processingRef.current)return;
     const card=players[0].hand[idx];const topCard=discardPile[discardPile.length-1];
 
     // Shift select mode - only number cards (disabled for MP clients for simplicity)
@@ -1021,8 +1051,8 @@ function UnoGame(){
 
   // ═══════ DRAW ═══════
   const doDraw=useCallback(()=>{
-    if(phase!=="PLAY"||currentPlayer!==0||aiThinking>=0||podium.includes(0)||dealing)return;
-    if(isClient()){sendToHost({t:"draw"});return}
+    if(phase!=="PLAY"||currentPlayer!==0||aiThinking>=0||podium.includes(0)||dealing||processingRef.current)return;
+    if(isClient()){processingRef.current=true;sendToHost({t:"draw"});return}
     setSelected([]);
     if(drawStack>0){
       const r=drawCards(drawStack,deckCards,discardPile);
@@ -1146,10 +1176,11 @@ function UnoGame(){
   },[mpIsHost,phase,currentPlayer,players,dealing,podium,drawStack,deckCards,discardPile,direction,drawCards,nextActive,addLog]);
 
   // ═══════ RENDER ═══════
-  const topCard=discardPile[discardPile.length-1];
+  // During fly animation, show previous top card; after animation lands, show new one
+  const topCard=pendingPile&&discardPile.length>1?discardPile[discardPile.length-2]:discardPile[discardPile.length-1];
   const myHand=players[0]?.hand||[];
   const myFinished=podium.includes(0);
-  const isMyTurn=phase==="PLAY"&&currentPlayer===0&&aiThinking<0&&!myFinished&&!dealing;
+  const isMyTurn=phase==="PLAY"&&currentPlayer===0&&aiThinking<0&&!myFinished&&!dealing&&!processingRef.current;
   const canPlayAny=myHand.some(c=>topCard&&canPlay(c,topCard,activeColor,drawStack));
   const hasDuplicates=useMemo(()=>{const seen={};for(const c of myHand){if(c.type!=="number")continue;const k=c.value;if(seen[k])return true;seen[k]=true}return false},[myHand]);
 
