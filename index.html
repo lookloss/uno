@@ -28,8 +28,8 @@ const MEDALS=["\uD83E\uDD47","\uD83E\uDD48","\uD83E\uDD49","4."];
 const UNO_TIME=5000;
 
 // ═══════ MULTIPLAYER CONFIG ═══════
-const DEFAULT_RULES={multiCard:true,stackDraw:true,drawUntilPlay:false,forcePlay:true,startCards:7,maxPlayers:4,unoTime:5};
-const RULE_LABELS={multiCard:"Multi-rzut (Shift)",stackDraw:"Podbijanie +2/+4",drawUntilPlay:"Ciagnij az zagrasz",forcePlay:"Musisz zagrac dobrana",unoTime:"Czas na UNO (s)"};
+const DEFAULT_RULES={multiCard:true,stackDraw:true,drawUntilPlay:false,forcePlay:true,sevenZero:false,startCards:7,maxPlayers:4,unoTime:5};
+const RULE_LABELS={multiCard:"Multi-rzut (Shift)",stackDraw:"Podbijanie +2/+4",drawUntilPlay:"Ciagnij az zagrasz",forcePlay:"Musisz zagrac dobrana",sevenZero:"Zasada 7-0",unoTime:"Czas na UNO (s)"};
 const genCode=()=>{const c="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";let s="";for(let i=0;i<5;i++)s+=c[Math.floor(Math.random()*c.length)];return s};
 const MP_EMOJIS=["\uD83D\uDE0E","\uD83E\uDD16","\uD83D\uDC7E","\uD83C\uDFAD"];
 
@@ -326,6 +326,25 @@ const CSS=`
 .room-join{padding:4px 12px;border-radius:6px;background:rgba(59,130,246,.2);border:1px solid rgba(59,130,246,.3);color:#3B82F6;font-size:11px;cursor:pointer}.room-join:hover{background:rgba(59,130,246,.35)}
 .room-scan{width:100%;padding:8px;background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.4);font-size:11px;text-align:center;cursor:pointer;margin-bottom:8px}.room-scan:hover{background:rgba(255,255,255,.08);color:rgba(255,255,255,.6)}
 .room-empty{text-align:center;color:rgba(255,255,255,.3);font-size:12px;padding:16px}
+.swap-ov{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;animation:fadeIn .2s}
+.swap-panel{background:rgba(20,20,40,.97);border:1px solid rgba(234,179,8,.3);border-radius:16px;padding:20px 24px;min-width:280;max-width:380px}
+.swap-t{text-align:center;color:#EAB308;font-family:Fredoka;font-size:18px;margin-bottom:14px}
+.swap-opt{display:flex;align-items:center;gap:10px;padding:10px 14px;margin:6px 0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;cursor:pointer;color:#fff;font-size:14px;transition:all .15s}
+.swap-opt:hover{background:rgba(234,179,8,.15);border-color:rgba(234,179,8,.4);transform:scale(1.02)}
+.chat-panel{position:fixed;bottom:52px;left:8px;width:280px;max-height:350px;background:rgba(15,15,35,.95);border:1px solid rgba(255,255,255,.12);border-radius:12px;z-index:90;display:flex;flex-direction:column;backdrop-filter:blur(8px)}
+.chat-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.6);font-size:12px;font-weight:600}
+.chat-close{cursor:pointer;font-size:14px;opacity:.5;padding:2px 6px}.chat-close:hover{opacity:1}
+.chat-body{flex:1;overflow-y:auto;padding:8px 10px;max-height:220px;min-height:60px}
+.chat-empty{color:rgba(255,255,255,.2);font-size:11px;text-align:center;padding:12px}
+.chat-msg{margin-bottom:4px;font-size:12px;line-height:1.4}
+.chat-name{color:#EAB308;font-size:10px;margin-right:4px}
+.chat-txt{color:rgba(255,255,255,.8)}
+.chat-foot{display:flex;gap:4px;padding:6px 8px;border-top:1px solid rgba(255,255,255,.08)}
+.chat-inp{flex:1;padding:6px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#fff;font-size:12px;outline:none;min-width:0}.chat-inp:focus{border-color:rgba(255,255,255,.3)}
+.chat-send{background:rgba(234,179,8,.2);border:1px solid rgba(234,179,8,.3);color:#EAB308;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:14px}.chat-send:hover{background:rgba(234,179,8,.35)}
+.chat-btn{position:relative}
+.chat-badge{position:absolute;top:-4px;right:-4px;background:#EF4444;color:#fff;font-size:9px;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:700}
+.lobby-chat{margin-top:12px;border:1px solid rgba(255,255,255,.08);border-radius:10px;overflow:hidden}
 .shint{position:absolute;bottom:3px;right:12px;z-index:5;padding:3px 9px;border-radius:5px;background:rgba(0,0,0,.3);color:rgba(255,255,255,.2);font-size:9px;pointer-events:none}
 `;
 
@@ -408,17 +427,37 @@ function UnoGame(){
   const[publicRooms,setPublicRooms]=useState([]);
   const[scanning,setScanning]=useState(false);
   const[mpNotice,setMpNotice]=useState("");
+  const[swapPicker,setSwapPicker]=useState(-1);
+  const[chatMsgs,setChatMsgs]=useState([]);
+  const[chatOpen,setChatOpen]=useState(false);
+  const[chatInput,setChatInput]=useState("");
+  const[chatUnread,setChatUnread]=useState(0);
+  const chatOpenRef=useRef(false);
+  const chatEndRef=useRef(null);
+  const chatInputRef=useRef(null);
   const toastTimer=useRef(null);
   useEffect(()=>{mpPlayersRef.current=mpPlayers},[mpPlayers]);
+  useEffect(()=>{chatOpenRef.current=chatOpen;if(chatOpen)setChatUnread(0)},[chatOpen]);
+  useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:"smooth"})},[chatMsgs]);
   useEffect(()=>{mpRulesRef.current=mpRules},[mpRules]);
 
-  // Shift key tracking
+  // Shift key tracking + T for chat
   useEffect(()=>{
-    const dn=e=>{if(e.key==="Shift")setShiftHeld(true)};
+    const dn=e=>{
+      if(e.key==="Shift")setShiftHeld(true);
+      if(e.key==="t"||e.key==="T"){
+        if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA")return;
+        if(!mpGameRef.current&&phase!=="MP_LOBBY")return;
+        e.preventDefault();
+        setChatOpen(true);
+        setTimeout(()=>chatInputRef.current?.focus(),50);
+      }
+      if(e.key==="Escape"&&chatOpen){setChatOpen(false)}
+    };
     const up=e=>{if(e.key==="Shift")setShiftHeld(false)};
     window.addEventListener("keydown",dn);window.addEventListener("keyup",up);
     return()=>{window.removeEventListener("keydown",dn);window.removeEventListener("keyup",up)};
-  },[]);
+  },[chatOpen,phase]);
 
   // Helpers
   const addLog=useCallback((msg,type="n")=>setLog(prev=>[...prev.slice(-30),{msg,type}]),[]);
@@ -485,7 +524,7 @@ function UnoGame(){
   // ═══════ START GAME ═══════
   const startGame=useCallback(()=>{
     mpGameRef.current=false; // ensure solo mode
-    gameRulesRef.current={...DEFAULT_RULES};
+    gameRulesRef.current={...mpRules,startCards:7};
     cid=0;let deck=shuf(mkDeck());
     const name=playerName.trim()||"Gracz";
     const pls=[{name,emoji:PEMOJI,type:"human",hand:[],score:0}];
@@ -507,7 +546,7 @@ function UnoGame(){
     setPlayers(pls);setDeck(deck);setDiscard([first]);setColor(startColor);
     setCurrent(startPlayer);setDirection(1);setDrawStack(0);
     setLog([]);setPodium([]);setDrawnCard(null);setUnoTarget(-1);setUnoPhase("idle");
-    setAiThinking(-1);setTurnTimer(30);setSelected([]);setFlyCards([]);
+    setAiThinking(-1);setTurnTimer(30);setSelected([]);setSwapPicker(-1);setFlyCards([]);setSwapPicker(-1);setChatMsgs([]);setSwapPicker(-1);
     setPhase("PLAY");setDealing(true);
     addLog(`Runda ${roundNum} - ${pls[startPlayer].name} zaczyna!`,"a");
 
@@ -594,42 +633,77 @@ function UnoGame(){
   const mpScanRooms=useCallback(()=>{
     if(scanning)return; // debounce
     setScanning(true);setPublicRooms([]);
-    // Create temp peer to scan
-    const tmpPeer=new Peer(undefined,{debug:0});
-    tmpPeer.on("open",()=>{
-      // Try listing all peers (works with PeerJS cloud)
-      try{
-        tmpPeer.listAllPeers((peers)=>{
-          const rooms=peers.filter(id=>id.startsWith(PEER_PREFIX)&&!id.startsWith(PEER_PREFIX+"X"));
-          if(!rooms.length){setScanning(false);tmpPeer.destroy();return}
-          // Probe each room for info
-          let found=[];let done=0;
-          rooms.forEach(rid=>{
-            const conn=tmpPeer.connect(rid,{reliable:true});
-            const timeout=setTimeout(()=>{done++;if(done>=rooms.length){setPublicRooms(found);setScanning(false);tmpPeer.destroy()}},2500);
-            conn.on("open",()=>{
-              conn.send(JSON.stringify({t:"probe"}));
-              conn.on("data",(d)=>{
-                try{
-                  const msg=JSON.parse(d);
-                  if(msg.t==="room_info"&&!msg.isPrivate){
-                    found.push({code:rid.replace(PEER_PREFIX,""),name:msg.name,players:msg.players,max:msg.max});
-                    setPublicRooms([...found]);
-                  }
-                }catch(e){}
-                clearTimeout(timeout);conn.close();
-                done++;if(done>=rooms.length){setScanning(false);setTimeout(()=>tmpPeer.destroy(),500)}
-              });
+
+    // Method 1: Try PeerJS REST API directly (fastest)
+    const scanViaAPI=()=>{
+      return fetch("https://0.peerjs.com/peerjs/peers")
+        .then(r=>r.json())
+        .then(peers=>{
+          const rooms=(peers||[]).filter(id=>id.startsWith(PEER_PREFIX)&&!id.startsWith(PEER_PREFIX+"X"));
+          return rooms;
+        })
+        .catch(()=>[]);
+    };
+
+    // Method 2: Try listAllPeers (PeerJS built-in)
+    const scanViaPeer=()=>{
+      return new Promise((resolve)=>{
+        const tmpPeer=new Peer(undefined,{debug:0});
+        const cleanup=()=>{try{tmpPeer.destroy()}catch(e){}};
+        tmpPeer.on("open",()=>{
+          try{
+            tmpPeer.listAllPeers((peers)=>{
+              const rooms=(peers||[]).filter(id=>id.startsWith(PEER_PREFIX)&&!id.startsWith(PEER_PREFIX+"X"));
+              cleanup();resolve(rooms);
             });
-            conn.on("error",()=>{clearTimeout(timeout);done++;if(done>=rooms.length){setPublicRooms(found);setScanning(false);tmpPeer.destroy()}});
-          });
+          }catch(e){cleanup();resolve([])}
         });
-      }catch(e){setScanning(false);tmpPeer.destroy()}
+        tmpPeer.on("error",()=>{cleanup();resolve([])});
+        setTimeout(()=>{cleanup();resolve([])},5000);
+      });
+    };
+
+    // Probe rooms for info
+    const probeRooms=(rooms)=>{
+      if(!rooms.length){setScanning(false);return}
+      const tmpPeer=new Peer(undefined,{debug:0});
+      tmpPeer.on("open",()=>{
+        let found=[];let done=0;
+        const finish=()=>{setPublicRooms(found);setScanning(false);setTimeout(()=>{try{tmpPeer.destroy()}catch(e){}},500)};
+        rooms.forEach(rid=>{
+          const conn=tmpPeer.connect(rid,{reliable:true});
+          const timeout=setTimeout(()=>{done++;if(done>=rooms.length)finish()},3000);
+          conn.on("open",()=>{
+            conn.send(JSON.stringify({t:"probe"}));
+            conn.on("data",(d)=>{
+              try{
+                const msg=JSON.parse(d);
+                if(msg.t==="room_info"&&!msg.isPrivate){
+                  found.push({code:rid.replace(PEER_PREFIX,""),name:msg.name,players:msg.players,max:msg.max});
+                  setPublicRooms([...found]);
+                }
+              }catch(e){}
+              clearTimeout(timeout);conn.close();
+              done++;if(done>=rooms.length)finish();
+            });
+          });
+          conn.on("error",()=>{clearTimeout(timeout);done++;if(done>=rooms.length)finish()});
+        });
+      });
+      tmpPeer.on("error",()=>{setScanning(false)});
+      setTimeout(()=>{try{tmpPeer.destroy()}catch(e){};setScanning(false)},8000);
+    };
+
+    // Try API first, fallback to peer listing
+    scanViaAPI().then(rooms=>{
+      if(rooms.length>0){probeRooms(rooms);return}
+      // Fallback
+      scanViaPeer().then(rooms2=>{
+        if(rooms2.length>0)probeRooms(rooms2);
+        else{setScanning(false);showToast("Nie znaleziono pokoi","info",2000)}
+      });
     });
-    tmpPeer.on("error",()=>{setScanning(false)});
-    // Fallback timeout
-    setTimeout(()=>{setScanning(false);try{tmpPeer.destroy()}catch(e){}},8000);
-  },[]);
+  },[scanning,showToast]);
 
   // Host: broadcast message to all connected clients
   const mpBroadcast=useCallback((msg)=>{
@@ -641,6 +715,19 @@ function UnoGame(){
   const mpBroadcastLobby=useCallback((pls,rules)=>{
     mpBroadcast({t:"lobby",players:pls||mpPlayersRef.current,rules:rules||undefined});
   },[mpBroadcast]);
+
+  // Chat: send message
+  const sendChat=useCallback((msg)=>{
+    if(!msg.trim())return;
+    const txt=msg.trim().slice(0,200);
+    const entry={name:playerName||"Host",emoji:PEMOJI,msg:txt,ts:Date.now()};
+    setChatMsgs(prev=>[...prev.slice(-50),entry]);
+    if(mpIsHost){
+      mpBroadcast({t:"chat_msg",...entry});
+    }else if(hostConnRef.current?.open){
+      hostConnRef.current.send(JSON.stringify({t:"chat",msg:txt}));
+    }
+  },[mpIsHost,playerName,mpBroadcast]);
 
   // Host: handle incoming message from a client
   const mpHostHandleMsg=useCallback((data,connId)=>{
@@ -688,6 +775,17 @@ function UnoGame(){
       else if(msg.t==="mp_ready"){
         setMpReady(prev=>({...prev,[connId]:true}));
       }
+      else if(msg.t==="chat"){
+        const sender=mpPlayersRef.current.find(p=>p.id===connId);
+        const entry={name:sender?.name||"?",emoji:sender?.emoji||"",msg:(msg.msg||"").slice(0,200),ts:Date.now()};
+        setChatMsgs(prev=>[...prev.slice(-50),entry]);
+        // Broadcast to all (including sender confirmation and others)
+        mpBroadcast({t:"chat_msg",...entry});
+      }
+      else if(msg.t==="swap_target"){
+        const pi=mpPlayerMapRef.current[connId];
+        if(pi!==undefined)mpActionRef.current={type:"swap_target",pi,target:msg.target};
+      }
     }catch(e){console.error("host msg err",e)}
   },[mpBroadcast,mpBroadcastLobby]);
 
@@ -716,6 +814,15 @@ function UnoGame(){
       else if(msg.t==="return_lobby"){
         mpGameRef.current=false;setPhase("MP_LOBBY");showToast("Host wrocil do lobby","info");
         setPlayers([]);setConfetti(false);
+      }
+      // ── CHAT ──
+      else if(msg.t==="chat_msg"){
+        setChatMsgs(prev=>{
+          // Dedupe: skip if we already have this (optimistic add)
+          if(prev.length&&prev[prev.length-1].msg===msg.msg&&prev[prev.length-1].name===msg.name&&Math.abs((prev[prev.length-1].ts||0)-msg.ts)<2000)return prev;
+          return[...prev.slice(-50),{name:msg.name,emoji:msg.emoji,msg:msg.msg,ts:msg.ts}];
+        });
+        if(!chatOpenRef.current)setChatUnread(u=>u+1);
       }
       // ── GAME STATE from host ──
       else if(msg.t==="game_state"){
@@ -796,6 +903,7 @@ function UnoGame(){
         else setConfetti(false);
         if(s.unoTarget!==undefined){setUnoTarget(s.unoTarget);setUnoPhase(s.unoPhase||"idle")}
         if(s.mpReady)setMpReady(s.mpReady);
+        if(s.swapPicker!==undefined)setSwapPicker(s.swapPicker);
       }
     }catch(e){console.error("client msg err",e)}
   },[mpCleanup,soundOn,spawnFly,snd,showToast]);
@@ -893,35 +1001,43 @@ function UnoGame(){
       {urls:"turns:standard.relay.metered.ca:443?transport=tcp",username:"013826048e4d7e865544af4e",credential:"kP0bBbisGd9H6AKB"}
     ]}});
     peerRef.current=peer;
+    let joined=false;let fails=0;
 
-    peer.on("open",(id)=>{
-      setMpMyId(id);
-      // Try public prefix first, then private
-      const conn=peer.connect(PEER_PREFIX+code,{reliable:true});
-      const connX=peer.connect(PEER_PREFIX+"X"+code,{reliable:true});
-      let connected=false;
-      const useConn=(c)=>{if(connected)return;connected=true;hostConnRef.current=c};
-
-      const setupConn=(c)=>{
-        c.on("open",()=>{useConn(c);setMpConnecting(false);setPhase("MP_LOBBY");c.send(JSON.stringify({t:"join",name}))});
+    const tryConnect=(prefix)=>{
+      const c=peer.connect(prefix+code,{reliable:true});
+      c.on("open",()=>{
+        if(joined){c.close();return}
+        joined=true;
+        hostConnRef.current=c;setMpConnecting(false);setPhase("MP_LOBBY");
+        c.send(JSON.stringify({t:"join",name}));
         c.on("data",(d)=>mpClientHandleMsg(d));
         c.on("close",()=>{
           if(hostConnRef.current===c){setMpError("Polaczenie utracone");showToast("Polaczenie z hostem utracone","err");setPhase("MP_MODE");mpCleanup()}
         });
-      };
-      setupConn(conn);setupConn(connX);
+      });
+    };
 
-      setTimeout(()=>{
-        if(!conn.open){setMpError("Nie znaleziono pokoju o kodzie "+code);setMpConnecting(false);mpCleanup()}
-      },8000);
+    peer.on("open",()=>{
+      setMpMyId(peer.id);
+      tryConnect(PEER_PREFIX);       // public: UNOG-CODE
+      tryConnect(PEER_PREFIX+"X");   // private: UNOG-XCODE
     });
 
+    // Count peer-unavailable errors - only fail when BOTH attempts fail
     peer.on("error",(err)=>{
+      if(err.type==="peer-unavailable"){
+        fails++;
+        if(fails>=2&&!joined){setMpError("Pokoj "+code+" nie istnieje");setMpConnecting(false);mpCleanup()}
+        return;
+      }
       console.error("Peer error:",err);
-      if(err.type==="peer-unavailable"){setMpError("Pokoj "+code+" nie istnieje");setPhase("MP_JOIN")}
-      else setMpError("Blad: "+err.type);
-      setMpConnecting(false);mpCleanup();
+      setMpError("Blad: "+err.type);setMpConnecting(false);mpCleanup();
     });
+
+    // Fallback timeout
+    setTimeout(()=>{
+      if(!joined){setMpError("Nie znaleziono pokoju - timeout");setMpConnecting(false);mpCleanup()}
+    },10000);
   },[mpJoinCode,playerName,mpClientHandleMsg,mpCleanup,showToast]);
 
   // Kick player (host)
@@ -995,11 +1111,12 @@ function UnoGame(){
         phase:ph,roundNum:rn,confetti:conf||false,
         unoTarget:ut>=0?rot(ut):-1,unoPhase:up||"idle",
         events:rotEvents,
-        mpReady:mpReady||{}
+        mpReady:mpReady||{},
+        swapPicker:swapPicker>=0?rot(swapPicker):-1
       };
       conn.send(JSON.stringify(state));
     });
-  },[mpReady]);
+  },[mpReady,swapPicker]);
 
   // Start multiplayer game (host) - also used for next round
   const mpStartGame=useCallback((isNextRound=false)=>{
@@ -1033,7 +1150,7 @@ function UnoGame(){
     setPlayers(pls);setDeck(deck);setDiscard([first]);setColor(first.color);
     setCurrent(startPlayer);setDirection(1);setDrawStack(0);
     setLog([]);setPodium([]);setDrawnCard(null);setUnoTarget(-1);setUnoPhase("idle");
-    setAiThinking(-1);setTurnTimer(30);setSelected([]);setFlyCards([]);
+    setAiThinking(-1);setTurnTimer(30);setSelected([]);setFlyCards([]);setSwapPicker(-1);setChatMsgs([]);setSwapPicker(-1);
     setMpReady({});
     setPhase("PLAY");setDealing(true);
     const lg=[{msg:`Multiplayer - ${pls[startPlayer].name} zaczyna!`,type:"a"}];
@@ -1081,7 +1198,7 @@ function UnoGame(){
       mpBroadcastGameState(players,deckCards,discardPile,currentPlayer,direction,activeColor,drawStack,logEntries,podium,drawnCard,phase,roundNum,confetti,unoTarget,unoPhase);
     },100);
     return()=>clearTimeout(tid);
-  },[mpIsHost,phase,players,currentPlayer,discardPile,activeColor,drawStack,direction,podium,drawnCard,logEntries,deckCards,roundNum,confetti,unoTarget,unoPhase,dealing,mpBroadcastGameState]);
+  },[mpIsHost,phase,players,currentPlayer,discardPile,activeColor,drawStack,direction,podium,drawnCard,logEntries,deckCards,roundNum,confetti,unoTarget,unoPhase,swapPicker,dealing,mpBroadcastGameState]);
 
   // Host: poll for remote player actions
   useEffect(()=>{
@@ -1091,6 +1208,15 @@ function UnoGame(){
       if(!act)return;
       mpActionRef.current=null;
       const pi=act.pi;
+      // 7-0: swap target from remote player
+      if(act.type==="swap_target"){
+        if(swapPicker>=0&&pi===swapPicker){
+          const n=players.length;
+          const tgt=act.target;
+          if(tgt!==pi&&tgt>=0&&tgt<n&&!podium.includes(tgt))executeSwap(pi,tgt);
+        }
+        return;
+      }
       if(pi!==currentPlayer)return; // not their turn
       const pl=players[pi];
       if(!pl||pl.type!=="remote")return;
@@ -1146,7 +1272,7 @@ function UnoGame(){
       }
     },80);
     return()=>clearInterval(iv);
-  },[mpIsHost,phase,currentPlayer,players,deckCards,discardPile,activeColor,drawStack,direction,podium,playCard,playMultiRemote,drawCards,nextActive,snd,addLog]);
+  },[mpIsHost,phase,currentPlayer,players,deckCards,discardPile,activeColor,drawStack,direction,podium,swapPicker,playCard,playMultiRemote,executeSwap,drawCards,nextActive,snd,addLog]);
 
   // ═══════ WIN CHECK ═══════
   const checkWin=useCallback((pls,pod,pi)=>{
@@ -1218,6 +1344,25 @@ function UnoGame(){
     return canPlay(c,top,col,stk);
   },[]);
 
+  // ═══════ 7-0 RULE: SWAP & ROTATE ═══════
+  const executeSwap=useCallback((fromPi,toPi)=>{
+    setSwapPicker(-1);
+    const pls=[...players];
+    const fromHand=[...pls[fromPi].hand];
+    const toHand=[...pls[toPi].hand];
+    pls[fromPi]={...pls[fromPi],hand:toHand};
+    pls[toPi]={...pls[toPi],hand:fromHand};
+    setPlayers(pls);
+    snd("special");
+    addLog(`7 - ${pls[fromPi].name} \u2194 ${pls[toPi].name}!`,"a");
+    mpEvt({e:"swap",from:fromPi,to:toPi,s:"special"});
+    // Check UNO for both after swap
+    triggerUno(fromPi,pls);triggerUno(toPi,pls);
+    // Advance turn
+    setCurrent(nextActive(fromPi,direction,pls,podium));
+    setTurnTimer(30);
+  },[players,direction,podium,nextActive,snd,addLog,mpEvt,triggerUno]);
+
   // ═══════ PLAY CARD ═══════
   const playCard=useCallback((pi,cardIdx,chosenColor=null)=>{
     if(processingRef.current)return;
@@ -1252,6 +1397,32 @@ function UnoGame(){
     else if(card.value==="wild4"){newStack=drawStack+4;snd("special");addLog(`${player.name} +4 -> ${CNAMES[chosenColor]||"?"} (${newStack})`,"a");mpEvt({e:"x",s:"special"})}
     else{snd("card");addLog(`${player.name} ${CNAMES[card.color]} ${card.symbol}`)}
 
+    // ── 7-0 Rule ──
+    if(gameRulesRef.current.sevenZero&&card.type==="number"){
+      if(card.value==="0"&&activePls>1){
+        const active=pls.map((p,i)=>({p,i})).filter(x=>!podium.includes(x.i));
+        if(active.length>1){
+          const hands=active.map(x=>[...x.p.hand]);
+          const shifted=newDir===1?[hands[hands.length-1],...hands.slice(0,-1)]:[...hands.slice(1),hands[0]];
+          active.forEach((x,a)=>{pls[x.i]={...pls[x.i],hand:shifted[a]}});
+          snd("special");addLog("0: rotacja rak!","a");mpEvt({e:"x",s:"special"});
+        }
+      }
+      if(card.value==="7"&&activePls>1&&player.hand.length>0){
+        setPlayers(pls);setDiscard(newDiscard);
+        setColor(newColor);setDirection(newDir);setDrawStack(newStack);setDrawnCard(null);
+        setPendingPile(true);setTimeout(()=>{setPendingPile(null);processingRef.current=false},300);
+        setSwapPicker(pi);
+        if(pls[pi].type==="ai"){
+          setTimeout(()=>{
+            const targets=pls.map((p,i)=>({p,i})).filter(x=>x.i!==pi&&!podium.includes(x.i));
+            if(targets.length){targets.sort((a,b)=>a.p.hand.length-b.p.hand.length);executeSwap(pi,targets[0].i)}
+          },700+Math.random()*500);
+        }
+        return;
+      }
+    }
+
     // Update state - pendingPile delays visual top card during fly animation
     setPlayers(pls);setDiscard(newDiscard);
     setColor(newColor);setDirection(newDir);setDrawStack(newStack);setDrawnCard(null);
@@ -1271,7 +1442,7 @@ function UnoGame(){
     triggerUno(pi,pls);
     setCurrent(skip?nextActive(pi,newDir,pls,podium,1):nextActive(pi,newDir,pls,podium));
     setTurnTimer(30);
-  },[players,discardPile,deckCards,activeColor,direction,drawStack,podium,unoTarget,unoPhase,nextActive,checkWin,triggerUno,snd,addLog,spawnFly,mpEvt]);
+  },[players,discardPile,deckCards,activeColor,direction,drawStack,podium,unoTarget,unoPhase,nextActive,checkWin,triggerUno,executeSwap,snd,addLog,spawnFly,mpEvt]);
 
   // ═══════ MULTI PLAY (shift select) ═══════
   const playMulti=useCallback((indices,chosenColor=null)=>{
@@ -1501,11 +1672,11 @@ function UnoGame(){
 
   // Turn timer for human (host only in MP, always in solo)
   useEffect(()=>{
-    if(phase!=="PLAY"||currentPlayer!==0||podium.includes(0)||dealing)return;
+    if(phase!=="PLAY"||currentPlayer!==0||podium.includes(0)||dealing||swapPicker>=0)return;
     if(mpGameRef.current&&!mpIsHost)return; // client: timer managed by host
     const iv=setInterval(()=>setTurnTimer(t=>{if(t<=1){clearInterval(iv);doDraw();return 30}return t-1}),1000);
     return()=>clearInterval(iv);
-  },[phase,currentPlayer,podium,dealing,doDraw,mpIsHost]);
+  },[phase,currentPlayer,podium,dealing,doDraw,mpIsHost,swapPicker]);
 
   // Client: visual timer countdown (no auto-action, just display)
   useEffect(()=>{
@@ -1517,7 +1688,7 @@ function UnoGame(){
 
   // Host: timeout for remote players (30s)
   useEffect(()=>{
-    if(!mpIsHost||!mpGameRef.current||phase!=="PLAY"||!players.length||dealing)return;
+    if(!mpIsHost||!mpGameRef.current||phase!=="PLAY"||!players.length||dealing||swapPicker>=0)return;
     const pl=players[currentPlayer];
     if(!pl||pl.type!=="remote"||podium.includes(currentPlayer))return;
     setTurnTimer(30);
@@ -1547,14 +1718,14 @@ function UnoGame(){
       return t-1;
     }),1000);
     return()=>clearInterval(iv);
-  },[mpIsHost,phase,currentPlayer,players,dealing,podium,drawStack,deckCards,discardPile,direction,drawCards,nextActive,addLog,mpEvt]);
+  },[mpIsHost,phase,currentPlayer,players,dealing,podium,drawStack,deckCards,discardPile,direction,swapPicker,drawCards,nextActive,addLog,mpEvt]);
 
   // ═══════ RENDER ═══════
   // During fly animation, show previous top card; after animation lands, show new one
   const topCard=pendingPile&&discardPile.length>1?discardPile[discardPile.length-2]:discardPile[discardPile.length-1];
   const myHand=players[0]?.hand||[];
   const myFinished=podium.includes(0);
-  const isMyTurn=phase==="PLAY"&&currentPlayer===0&&aiThinking<0&&!myFinished&&!dealing&&!processingRef.current;
+  const isMyTurn=phase==="PLAY"&&currentPlayer===0&&aiThinking<0&&!myFinished&&!dealing&&!processingRef.current&&swapPicker<0;
   const canPlayAny=myHand.some(c=>topCard&&canPlayRuled(c,topCard,activeColor,drawStack));
   const hasDuplicates=useMemo(()=>{const seen={};for(const c of myHand){if(c.type!=="number")continue;const k=c.value;if(seen[k])return true;seen[k]=true}return false},[myHand]);
 
@@ -1574,6 +1745,10 @@ function UnoGame(){
       <div className="m-opts">{[2,3,4].map(n=><div key={n} className={`m-opt ${numPlayers===n?"act":""}`} onClick={()=>setNumPlayers(n)}>{n}</div>)}</div>
       <div className="m-lbl">Trudnosc</div>
       <div className="m-opts">{[["easy","Latwy"],["medium","Sredni"],["hard","Trudny"]].map(([v,l])=><div key={v} className={`m-opt ${difficulty===v?"act":""}`} onClick={()=>setDifficulty(v)}>{l}</div>)}</div>
+      <div className="mp-rule" style={{marginTop:8,padding:"6px 0"}}>
+        <span className="mp-rule-lbl">Zasada 7-0</span>
+        <div className={`mp-toggle ${mpRules.sevenZero?"on":""}`} onClick={()=>setMpRules(r=>({...r,sevenZero:!r.sevenZero}))}/>
+      </div>
       <button className="btn-go" onClick={startGame}>GRA SOLO</button>
       <button className="btn-mp" onClick={()=>setPhase("MP_MODE")}>MULTIPLAYER</button>
       <button className="btn-s" style={{width:"100%",marginTop:8}} onClick={()=>setShowRules(true)}>Zasady</button>
@@ -1587,6 +1762,8 @@ function UnoGame(){
       <p>Skip - pomija nastepnego. Reverse - zmiana kierunku. +2/+4 - dobieranie.</p>
       <h3 style={{color:"#EAB308",fontSize:14,marginTop:12}}>UNO!</h3>
       <p>Przycisk UNO jest przy wskazniku koloru. Gdy zostanie ci 1 karta - kliknij statyczny przycisk, potem zlap skaczacego! Masz 5 sekund.</p>
+      <h3 style={{color:"#EAB308",fontSize:14,marginTop:12}}>Zasada 7-0</h3>
+      <p>7 = zamieniasz reke z wybranym graczem. 0 = rotacja rak wszystkich graczy w kierunku gry.</p>
       <h3 style={{color:"#EAB308",fontSize:14,marginTop:12}}>Multi-rzut (Shift)</h3>
       <p>Shift+klik = zaznacz karty liczbowe o tej samej wartosci. Nie dziala na +2, Skip, Reverse, Wild.</p>
       <button className="btn-s" onClick={()=>setShowRules(false)}>OK</button>
@@ -1671,7 +1848,7 @@ function UnoGame(){
     <div className="m-panel" style={{minWidth:380,maxWidth:440}}>
       <div className="m-lbl">Kod pokoju</div>
       <div style={{display:"flex",gap:8}}>
-        <input className="m-inp" value={mpJoinCode} onChange={e=>setMpJoinCode(e.target.value.toUpperCase())} placeholder="np. ABC12" maxLength={6} style={{textAlign:"center",fontSize:20,letterSpacing:4,fontFamily:"Fredoka",flex:1}}/>
+        <input className="m-inp" value={mpJoinCode} onChange={e=>setMpJoinCode(e.target.value.toUpperCase())} placeholder="np. ABC12" maxLength={5} style={{textAlign:"center",fontSize:20,letterSpacing:4,fontFamily:"Fredoka",flex:1,width:"auto",minWidth:0}}/>
         <button className="btn-go" style={{margin:0,padding:"8px 20px",fontSize:14,minWidth:80}} onClick={mpJoinRoom} disabled={mpConnecting}>
           {mpConnecting?<span className="mp-spin"/>:"DOLACZ"}
         </button>
@@ -1734,7 +1911,7 @@ function UnoGame(){
 
         {mpIsHost&&<div className="lobby-section">
           <div className="lobby-section-title">Zasady</div>
-          {["multiCard","stackDraw","drawUntilPlay","forcePlay"].map(key=>
+          {["multiCard","stackDraw","drawUntilPlay","forcePlay","sevenZero"].map(key=>
             <div key={key} className="mp-rule">
               <span className="mp-rule-lbl">{RULE_LABELS[key]}</span>
               <div className={`mp-toggle ${mpRules[key]?"on":""}`} onClick={()=>mpSetRule(key,!mpRules[key])}/>
@@ -1744,13 +1921,29 @@ function UnoGame(){
 
         {!mpIsHost&&<div className="lobby-section">
           <div className="lobby-section-title">Zasady (ustawione przez hosta)</div>
-          {["multiCard","stackDraw","drawUntilPlay","forcePlay"].map(key=>
+          {["multiCard","stackDraw","drawUntilPlay","forcePlay","sevenZero"].map(key=>
             <div key={key} className="mp-rule">
               <span className="mp-rule-lbl">{RULE_LABELS[key]}</span>
               <span style={{color:mpRules[key]?"#22C55E":"#EF4444",fontSize:12}}>{mpRules[key]?"Tak":"Nie"}</span>
             </div>
           )}
         </div>}
+
+        {/* Lobby chat */}
+        <div className="lobby-chat">
+          <div className="chat-body" style={{maxHeight:120}}>
+            {chatMsgs.length===0&&<div className="chat-empty">Chat - napisz cos!</div>}
+            {chatMsgs.map((m,i)=><div key={i} className="chat-msg">
+              <span className="chat-name">{m.emoji} {m.name}</span>
+              <span className="chat-txt">{m.msg}</span>
+            </div>)}
+            <div ref={chatEndRef}/>
+          </div>
+          <div className="chat-foot">
+            <input ref={chatInputRef} className="chat-inp" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&chatInput.trim()){sendChat(chatInput);setChatInput("")}}} placeholder="Napisz... (T)" maxLength={200}/>
+            <button className="chat-send" onClick={()=>{if(chatInput.trim()){sendChat(chatInput);setChatInput("")}}}>\u27A4</button>
+          </div>
+        </div>
 
         {mpError&&<div className="mp-err" style={mpError==="Skopiowano!"?{color:"#22C55E"}:undefined}>{mpError}</div>}
 
@@ -1780,6 +1973,7 @@ function UnoGame(){
       <div className="tbar-r">
         <div className="ibtn" onClick={()=>setSoundOn(!soundOn)}>{soundOn?"\uD83D\uDD0A":"\uD83D\uDD07"}</div>
         <div className="ibtn" onClick={()=>setLogOpen(!logOpen)}>{"\uD83D\uDCCB"}</div>
+        {mpGameRef.current&&<div className="ibtn chat-btn" onClick={()=>setChatOpen(!chatOpen)} title="Chat">{chatUnread>0&&<span className="chat-badge">{chatUnread}</span>}{"\uD83D\uDCAC"}</div>}
         {mpGameRef.current&&mpIsHost&&<div className="hp-btn" onClick={()=>setHostPanel(!hostPanel)} title="Panel hosta">{"\u2699"}</div>}
         <div className="ibtn" onClick={()=>{if(mpGameRef.current)setConfirmLeave(true);else toMenu()}}>{"\u2715"}</div>
       </div>
@@ -1839,6 +2033,24 @@ function UnoGame(){
 
     {/* Flying cards */}
     {flyCards.map(f=><FlyCard key={f.id} card={f.card} back={f.back} fx={f.fx} fy={f.fy} tx={f.tx} ty={f.ty} dur={f.dur} onDone={()=>setFlyCards(p=>p.filter(x=>x.id!==f.id))}/>)}
+
+    {/* Swap picker (7-0 rule) */}
+    {swapPicker===0&&<div className="swap-ov">
+      <div className="swap-panel">
+        <div className="swap-t">{"\u2194"} Zamien reke z:</div>
+        {players.map((p,i)=>{
+          if(i===0||podium.includes(i))return null;
+          return <div key={i} className="swap-opt" onClick={()=>{
+            if(isClient()){sendToHost({t:"swap_target",target:i});setSwapPicker(-1)}
+            else executeSwap(0,i);
+          }}>
+            <span style={{fontSize:22}}>{p.emoji}</span>
+            <span style={{flex:1}}>{p.name}</span>
+            <span style={{color:"rgba(255,255,255,.4)",fontSize:11}}>{p.hand?.length||p.handCount||"?"} kart</span>
+          </div>;
+        })}
+      </div>
+    </div>}
 
     {/* Action buttons */}
     {isMyTurn&&!canPlayAny&&drawStack===0&&!drawnCard&&!selected.length&&<button className="dbtn" onClick={doDraw}>{gameRulesRef.current.drawUntilPlay?"Dobierz ponownie":"Dobierz karte"}</button>}
@@ -1942,6 +2154,26 @@ function UnoGame(){
 
     {/* Toast notification */}
     {toast&&<div className={`toast toast-${toast.type}`}>{toast.msg}</div>}
+
+    {/* Chat panel (in-game) */}
+    {mpGameRef.current&&chatOpen&&<div className="chat-panel">
+      <div className="chat-head">
+        <span>Chat <span style={{opacity:.4,fontSize:10,marginLeft:4}}>T / Esc</span></span>
+        <span className="chat-close" onClick={()=>setChatOpen(false)}>{"\u2715"}</span>
+      </div>
+      <div className="chat-body">
+        {chatMsgs.length===0&&<div className="chat-empty">Brak wiadomosci</div>}
+        {chatMsgs.map((m,i)=><div key={i} className="chat-msg">
+          <span className="chat-name">{m.emoji} {m.name}</span>
+          <span className="chat-txt">{m.msg}</span>
+        </div>)}
+        <div ref={chatEndRef}/>
+      </div>
+      <div className="chat-foot">
+        <input ref={chatInputRef} className="chat-inp" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&chatInput.trim()){sendChat(chatInput);setChatInput("")}}} placeholder="Napisz... (T)" maxLength={200}/>
+        <button className="chat-send" onClick={()=>{if(chatInput.trim()){sendChat(chatInput);setChatInput("")}}}>{"\u27A4"}</button>
+      </div>
+    </div>}
 
     {/* Confirm leave dialog */}
     {confirmLeave&&<div className="confirm-ov" onClick={()=>setConfirmLeave(false)}>
