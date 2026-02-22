@@ -318,14 +318,6 @@ const CSS=`
 .hp-warn{background:rgba(234,179,8,.2);border:1px solid rgba(234,179,8,.3);color:#EAB308}.hp-warn:hover{background:rgba(234,179,8,.35)}
 .hp-kick{background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.3);color:#EF4444}.hp-kick:hover{background:rgba(239,68,68,.35)}
 
-.room-list{margin-top:12px;max-height:200px;overflow-y:auto;scrollbar-width:thin}
-.room-item{display:flex;align-items:center;gap:8px;padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:9px;margin-bottom:6px;cursor:pointer;transition:all .2s}
-.room-item:hover{background:rgba(255,255,255,.08);border-color:rgba(59,130,246,.3)}
-.room-name{flex:1;color:#fff;font-size:13px;font-weight:500}
-.room-count{color:rgba(255,255,255,.5);font-size:11px}
-.room-join{padding:4px 12px;border-radius:6px;background:rgba(59,130,246,.2);border:1px solid rgba(59,130,246,.3);color:#3B82F6;font-size:11px;cursor:pointer}.room-join:hover{background:rgba(59,130,246,.35)}
-.room-scan{width:100%;padding:8px;background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.4);font-size:11px;text-align:center;cursor:pointer;margin-bottom:8px}.room-scan:hover{background:rgba(255,255,255,.08);color:rgba(255,255,255,.6)}
-.room-empty{text-align:center;color:rgba(255,255,255,.3);font-size:12px;padding:16px}
 .swap-ov{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;animation:fadeIn .2s}
 .swap-panel{background:rgba(20,20,40,.97);border:1px solid rgba(234,179,8,.3);border-radius:16px;padding:20px 24px;min-width:280;max-width:380px}
 .swap-t{text-align:center;color:#EAB308;font-family:Fredoka;font-size:18px;margin-bottom:14px}
@@ -424,8 +416,6 @@ function UnoGame(){
   const[toast,setToast]=useState(null);    // {msg,type} notification
   const[confirmLeave,setConfirmLeave]=useState(false);
   const[hostPanel,setHostPanel]=useState(false);
-  const[publicRooms,setPublicRooms]=useState([]);
-  const[scanning,setScanning]=useState(false);
   const[mpNotice,setMpNotice]=useState("");
   const[swapPicker,setSwapPicker]=useState(-1);
   const[chatMsgs,setChatMsgs]=useState([]);
@@ -569,9 +559,14 @@ function UnoGame(){
   const nextRound=useCallback(()=>{setConfetti(false);setRoundNum(r=>r+1);startGame()},[startGame]);
   const mpNextRound=useCallback(()=>{
     if(mpIsHost){
-      // Check all connected clients are ready
-      const allReady=connsRef.current.every(c=>mpReady[c.peer]);
-      if(!allReady){setMpError("Nie wszyscy gotowi!");return}
+      // Sync mpPlayers: remove disconnected, keep only host + active connections
+      const activePeers=new Set(connsRef.current.filter(c=>c.open).map(c=>c.peer));
+      const syncedPlayers=mpPlayersRef.current.filter(p=>p.isHost||activePeers.has(p.id));
+      setMpPlayers(syncedPlayers);mpPlayersRef.current=syncedPlayers;
+      // Check all CONNECTED clients are ready (skip disconnected)
+      const connReady=connsRef.current.filter(c=>c.open).every(c=>mpReady[c.peer]);
+      if(!connReady&&connsRef.current.some(c=>c.open)){setMpError("Nie wszyscy gotowi!");return}
+      if(syncedPlayers.length<2){setMpError("Za malo graczy!");return}
       setConfetti(false);setRoundNum(r=>r+1);mpStartGame(true);
     }else{
       // Client: send ready signal
@@ -589,12 +584,15 @@ function UnoGame(){
   // Return to lobby (keep connections alive)
   const mpReturnToLobby=useCallback(()=>{
     setConfetti(false);setPlayers([]);setRoundNum(1);clearTimeout(unoTimer.current);clearTimeout(aiTimer.current);
-    mpGameRef.current=false;setMpReady({});
+    mpGameRef.current=false;setMpReady({});setSwapPicker(-1);
+    mpPlayerMapRef.current={};
     setPhase("MP_LOBBY");
-    // Rebuild lobby players from current state (handles disconnects)
+    // Rebuild lobby players from active connections only
     const activePeerIds=new Set(connsRef.current.filter(c=>c.open).map(c=>c.peer));
     const lobbyPls=mpPlayersRef.current.filter(p=>p.isHost||activePeerIds.has(p.id)).map(p=>({...p,ready:false}));
     setMpPlayers(lobbyPls);mpPlayersRef.current=lobbyPls;
+    // Close stale connections
+    connsRef.current=connsRef.current.filter(c=>c.open);
     if(mpIsHost){
       mpBroadcast({t:"return_lobby"});
       setTimeout(()=>mpBroadcastLobby(lobbyPls),300);
@@ -630,57 +628,6 @@ function UnoGame(){
   const PEER_PREFIX="UNOG-";
 
   // Scan for public rooms using PeerJS
-  const mpScanRooms=useCallback(()=>{
-    if(scanning)return; // debounce
-    setScanning(true);setPublicRooms([]);
-
-    // Probe rooms for info
-    const probeRooms=(rooms)=>{
-      if(!rooms.length){setScanning(false);showToast("Nie znaleziono pokoi","info",2000);return}
-      const tmpPeer=new Peer(undefined,{debug:0});
-      tmpPeer.on("open",()=>{
-        let found=[];let done=0;
-        const finish=()=>{setPublicRooms(found);setScanning(false);setTimeout(()=>{try{tmpPeer.destroy()}catch(e){}},500)};
-        rooms.forEach(rid=>{
-          const conn=tmpPeer.connect(rid,{reliable:true});
-          const timeout=setTimeout(()=>{done++;if(done>=rooms.length)finish()},3000);
-          conn.on("open",()=>{
-            conn.send(JSON.stringify({t:"probe"}));
-            conn.on("data",(d)=>{
-              try{
-                const msg=JSON.parse(d);
-                if(msg.t==="room_info"&&!msg.isPrivate){
-                  found.push({code:rid.replace(PEER_PREFIX,""),name:msg.name,players:msg.players,max:msg.max});
-                  setPublicRooms([...found]);
-                }
-              }catch(e){}
-              clearTimeout(timeout);conn.close();
-              done++;if(done>=rooms.length)finish();
-            });
-          });
-          conn.on("error",()=>{clearTimeout(timeout);done++;if(done>=rooms.length)finish()});
-        });
-      });
-      tmpPeer.on("error",()=>{setScanning(false)});
-      setTimeout(()=>{try{tmpPeer.destroy()}catch(e){};setScanning(false)},8000);
-    };
-
-    // Use PeerJS listAllPeers to find rooms
-    const tmpPeer=new Peer(undefined,{debug:0});
-    tmpPeer.on("open",()=>{
-      try{
-        tmpPeer.listAllPeers((peers)=>{
-          const rooms=(peers||[]).filter(id=>id.startsWith(PEER_PREFIX)&&!id.startsWith(PEER_PREFIX+"X"));
-          tmpPeer.destroy();
-          if(rooms.length>0)probeRooms(rooms);
-          else{setScanning(false);showToast("Nie znaleziono pokoi","info",2000)}
-        });
-      }catch(e){setScanning(false);tmpPeer.destroy()}
-    });
-    tmpPeer.on("error",()=>{setScanning(false)});
-    setTimeout(()=>{setScanning(false);try{tmpPeer.destroy()}catch(e){}},8000);
-  },[scanning,showToast]);
-
   // Host: broadcast message to all connected clients
   const mpBroadcast=useCallback((msg)=>{
     const str=JSON.stringify(msg);
@@ -711,8 +658,19 @@ function UnoGame(){
     try{
       const msg=typeof data==="string"?JSON.parse(data):data;
       if(msg.t==="join"){
+        // Block joins during active game
+        if(mpGameRef.current){
+          const conn=connsRef.current.find(c=>c.peer===connId);
+          if(conn?.open)conn.send(JSON.stringify({t:"error",msg:"Gra w toku - poczekaj na zakonczenie"}));
+          setTimeout(()=>{connsRef.current=connsRef.current.filter(c=>c.peer!==connId);conn?.close()},500);
+          return;
+        }
         const cur=mpPlayersRef.current;
-        if(cur.length>=(mpRulesRef.current.maxPlayers||4)){mpBroadcast({t:"error",msg:"Pokoj pelny"});return}
+        if(cur.length>=(mpRulesRef.current.maxPlayers||4)){
+          const conn=connsRef.current.find(c=>c.peer===connId);
+          if(conn?.open)conn.send(JSON.stringify({t:"error",msg:"Pokoj pelny"}));
+          return;
+        }
         if(cur.find(p=>p.id===connId))return;
         const np=[...cur,{id:connId,name:msg.name||"Gracz",emoji:MP_EMOJIS[cur.length]||PEMOJI,isHost:false,ready:false}];
         setMpPlayers(np);mpPlayersRef.current=np;
@@ -841,17 +799,19 @@ function UnoGame(){
                 }
               }
               else if(ev.e==="deal"){
-                // Deal animation
+                // Deal animation - show face for own cards, back for others
                 setDealing(true);
                 const q=ev.queue||[];
                 let idx=0;
                 const dealNext=()=>{
                   if(idx>=q.length){setDealing(false);return}
-                  const{pi:dpi}=q[idx];
+                  const dq=q[idx];
+                  const dpi=dq.pi;
                   const n=pls.length;
                   const pk=dpi===0?"b":n===2?"t":n===3?(dpi===1?"l":"r"):(dpi===1?"l":dpi===2?"t":"r");
                   const from2=deckPos();const to2=screenPos(pk);
-                  spawnFly({},true,from2.x,from2.y,to2.x,to2.y,220);
+                  const isMe=dpi===0&&dq.card;
+                  spawnFly(isMe?dq.card:{},!isMe,from2.x,from2.y,to2.x,to2.y,220);
                   if(soundOn)audio.current.play("deal");
                   idx++;setTimeout(dealNext,75);
                 };
@@ -1072,12 +1032,16 @@ function UnoGame(){
           handCount:p.hand.length
         });
       }
-      // Rotate event player indices
+      // Rotate event player indices, strip card data for non-self
       const rotEvents=events.map(ev=>{
         const re={...ev};
         if(re.pi!==undefined)re.pi=rot(re.pi);
         if(re.skipPi!==undefined)re.skipPi=rot(re.skipPi);
-        if(re.queue)re.queue=re.queue.map(q=>({...q,pi:rot(q.pi)}));
+        if(re.queue)re.queue=re.queue.map(q=>{
+          const rq={...q,pi:rot(q.pi)};
+          if(rq.pi!==0)delete rq.card; // strip card data for other players
+          return rq;
+        });
         return re;
       });
       const state={
@@ -1159,8 +1123,8 @@ function UnoGame(){
       idx++;setTimeout(dealNext,75);
     };
 
-    // Send deal event to clients so they animate too
-    const dealEvt={e:"deal",queue:dealQueue.map(d=>({pi:d.pi}))};
+    // Send deal event to clients so they animate too (include card data - will be stripped for non-self)
+    const dealEvt={e:"deal",queue:dealQueue.map(d=>({pi:d.pi,card:d.card}))};
     mpEventsRef.current.push(dealEvt);
     // Broadcast initial state (empty hands) + deal event
     setTimeout(()=>{
@@ -1728,9 +1692,14 @@ function UnoGame(){
       <div className="m-opts">{[2,3,4].map(n=><div key={n} className={`m-opt ${numPlayers===n?"act":""}`} onClick={()=>setNumPlayers(n)}>{n}</div>)}</div>
       <div className="m-lbl">Trudnosc</div>
       <div className="m-opts">{[["easy","Latwy"],["medium","Sredni"],["hard","Trudny"]].map(([v,l])=><div key={v} className={`m-opt ${difficulty===v?"act":""}`} onClick={()=>setDifficulty(v)}>{l}</div>)}</div>
-      <div className="mp-rule" style={{marginTop:8,padding:"6px 0"}}>
-        <span className="mp-rule-lbl">Zasada 7-0</span>
-        <div className={`mp-toggle ${mpRules.sevenZero?"on":""}`} onClick={()=>setMpRules(r=>({...r,sevenZero:!r.sevenZero}))}/>
+      <div className="lobby-section" style={{marginTop:10}}>
+        <div className="lobby-section-title" style={{fontSize:10}}>Zasady</div>
+        {["multiCard","stackDraw","drawUntilPlay","forcePlay","sevenZero"].map(key=>
+          <div key={key} className="mp-rule">
+            <span className="mp-rule-lbl">{RULE_LABELS[key]}</span>
+            <div className={`mp-toggle ${mpRules[key]?"on":""}`} onClick={()=>setMpRules(r=>({...r,[key]:!r[key]}))}/>
+          </div>
+        )}
       </div>
       <button className="btn-go" onClick={startGame}>GRA SOLO</button>
       <button className="btn-mp" onClick={()=>setPhase("MP_MODE")}>MULTIPLAYER</button>
@@ -1803,7 +1772,7 @@ function UnoGame(){
 
       <div className="lobby-section">
         <div className="lobby-section-title">Zasady gry</div>
-        {["multiCard","stackDraw","drawUntilPlay","forcePlay"].map(key=>
+        {["multiCard","stackDraw","drawUntilPlay","forcePlay","sevenZero"].map(key=>
           <div key={key} className="mp-rule">
             <span className="mp-rule-lbl">{RULE_LABELS[key]}</span>
             <div className={`mp-toggle ${mpRules[key]?"on":""}`} onClick={()=>mpSetRule(key,!mpRules[key])}/>
@@ -1835,25 +1804,7 @@ function UnoGame(){
         {mpConnecting?<span className="mp-spin"/>:"DOLACZ"}
       </button>
       {mpError&&<div className="mp-err">{mpError}</div>}
-
-      <div style={{margin:"16px 0 8px",borderTop:"1px solid rgba(255,255,255,.08)",paddingTop:12}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-          <span style={{color:"rgba(255,255,255,.4)",fontSize:10,textTransform:"uppercase",letterSpacing:1.5}}>Pokoje publiczne</span>
-          <div className="room-scan" style={{width:"auto",margin:0,padding:"4px 12px"}} onClick={mpScanRooms}>
-            {scanning?<span className="mp-spin" style={{width:10,height:10,display:"inline-block"}}/>:"Skanuj"}
-          </div>
-        </div>
-        <div className="room-list">
-          {publicRooms.length===0&&!scanning&&<div className="room-empty">Kliknij "Skanuj" aby wyszukac pokoje</div>}
-          {scanning&&<div className="room-empty"><span className="mp-spin" style={{display:"inline-block",marginRight:8}}/>Szukam pokoi...</div>}
-          {publicRooms.map(r=><div key={r.code} className="room-item" onClick={()=>{setMpJoinCode(r.code)}}>
-            <span style={{fontSize:16}}>\uD83C\uDFAE</span>
-            <span className="room-name">{r.name}</span>
-            <span className="room-count">{r.players}/{r.max}</span>
-            <span className="room-join">Dolacz</span>
-          </div>)}
-        </div>
-      </div>
+      <div style={{marginTop:16,textAlign:"center",color:"rgba(255,255,255,.25)",fontSize:11}}>Wpisz kod otrzymany od hosta</div>
     </div>
     {mpNotice&&<div style={{position:"fixed",inset:0,zIndex:800,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setMpNotice("")}>
       <div className="confirm-box" onClick={e=>e.stopPropagation()}>
