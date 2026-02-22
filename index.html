@@ -610,7 +610,7 @@ function UnoGame(){
     if(!peerId)return;
     const conn=connsRef.current.find(c=>c.peer===peerId);
     if(conn&&conn.open){conn.send(JSON.stringify({t:"kicked_game",reason:"Wyrzucony przez hosta"}));setTimeout(()=>conn.close(),300)}
-    setPlayers(prev=>prev.map((p,i)=>i===pi?{...p,type:"ai",name:p.name+" (bot)"}:p));
+    setPlayers(prev=>prev.map((p,i)=>i===pi?{...p,type:"ai",name:p.name.endsWith("(bot)")?p.name:p.name+" (bot)"}:p));
     addLog(`${players[pi]?.name||"Gracz"} wyrzucony - zastapiony botem`,"p");
     showToast(`${players[pi]?.name||"Gracz"} wyrzucony`,"warn");
     setHostPanel(false);
@@ -634,38 +634,9 @@ function UnoGame(){
     if(scanning)return; // debounce
     setScanning(true);setPublicRooms([]);
 
-    // Method 1: Try PeerJS REST API directly (fastest)
-    const scanViaAPI=()=>{
-      return fetch("https://0.peerjs.com/peerjs/peers")
-        .then(r=>r.json())
-        .then(peers=>{
-          const rooms=(peers||[]).filter(id=>id.startsWith(PEER_PREFIX)&&!id.startsWith(PEER_PREFIX+"X"));
-          return rooms;
-        })
-        .catch(()=>[]);
-    };
-
-    // Method 2: Try listAllPeers (PeerJS built-in)
-    const scanViaPeer=()=>{
-      return new Promise((resolve)=>{
-        const tmpPeer=new Peer(undefined,{debug:0});
-        const cleanup=()=>{try{tmpPeer.destroy()}catch(e){}};
-        tmpPeer.on("open",()=>{
-          try{
-            tmpPeer.listAllPeers((peers)=>{
-              const rooms=(peers||[]).filter(id=>id.startsWith(PEER_PREFIX)&&!id.startsWith(PEER_PREFIX+"X"));
-              cleanup();resolve(rooms);
-            });
-          }catch(e){cleanup();resolve([])}
-        });
-        tmpPeer.on("error",()=>{cleanup();resolve([])});
-        setTimeout(()=>{cleanup();resolve([])},5000);
-      });
-    };
-
     // Probe rooms for info
     const probeRooms=(rooms)=>{
-      if(!rooms.length){setScanning(false);return}
+      if(!rooms.length){setScanning(false);showToast("Nie znaleziono pokoi","info",2000);return}
       const tmpPeer=new Peer(undefined,{debug:0});
       tmpPeer.on("open",()=>{
         let found=[];let done=0;
@@ -694,15 +665,20 @@ function UnoGame(){
       setTimeout(()=>{try{tmpPeer.destroy()}catch(e){};setScanning(false)},8000);
     };
 
-    // Try API first, fallback to peer listing
-    scanViaAPI().then(rooms=>{
-      if(rooms.length>0){probeRooms(rooms);return}
-      // Fallback
-      scanViaPeer().then(rooms2=>{
-        if(rooms2.length>0)probeRooms(rooms2);
-        else{setScanning(false);showToast("Nie znaleziono pokoi","info",2000)}
-      });
+    // Use PeerJS listAllPeers to find rooms
+    const tmpPeer=new Peer(undefined,{debug:0});
+    tmpPeer.on("open",()=>{
+      try{
+        tmpPeer.listAllPeers((peers)=>{
+          const rooms=(peers||[]).filter(id=>id.startsWith(PEER_PREFIX)&&!id.startsWith(PEER_PREFIX+"X"));
+          tmpPeer.destroy();
+          if(rooms.length>0)probeRooms(rooms);
+          else{setScanning(false);showToast("Nie znaleziono pokoi","info",2000)}
+        });
+      }catch(e){setScanning(false);tmpPeer.destroy()}
     });
+    tmpPeer.on("error",()=>{setScanning(false)});
+    setTimeout(()=>{setScanning(false);try{tmpPeer.destroy()}catch(e){}},8000);
   },[scanning,showToast]);
 
   // Host: broadcast message to all connected clients
@@ -721,11 +697,12 @@ function UnoGame(){
     if(!msg.trim())return;
     const txt=msg.trim().slice(0,200);
     const entry={name:playerName||"Host",emoji:PEMOJI,msg:txt,ts:Date.now()};
-    setChatMsgs(prev=>[...prev.slice(-50),entry]);
     if(mpIsHost){
+      setChatMsgs(prev=>[...prev.slice(-50),entry]);
       mpBroadcast({t:"chat_msg",...entry});
     }else if(hostConnRef.current?.open){
       hostConnRef.current.send(JSON.stringify({t:"chat",msg:txt}));
+      // No optimistic add - wait for host broadcast to avoid duplicates
     }
   },[mpIsHost,playerName,mpBroadcast]);
 
@@ -839,13 +816,19 @@ function UnoGame(){
           let delay=0;
           s.events.forEach(ev=>{
             setTimeout(()=>{
-              if(ev.e==="play"){
-                // Card played: fly from player to pile
+              if(ev.e==="play"||ev.e==="play_multi"){
+                // Card played: fly from player to pile - always show face
                 const n=pls.length;
                 const pk=ev.pi===0?"b":n===2?"t":n===3?(ev.pi===1?"l":"r"):(ev.pi===1?"l":ev.pi===2?"t":"r");
                 const from=screenPos(pk);
                 const to=pilePos();
-                spawnFly(ev.card||{},ev.pi!==0,from.x,from.y,to.x,to.y,320);
+                if(ev.queue){
+                  ev.queue.forEach((q,qi)=>{
+                    setTimeout(()=>spawnFly(q.card||{},false,from.x,from.y,to.x,to.y,300),qi*120);
+                  });
+                }else{
+                  spawnFly(ev.card||{},false,from.x,from.y,to.x,to.y,320);
+                }
               }
               else if(ev.e==="draw"){
                 // Cards drawn: fly from deck to player
@@ -963,7 +946,7 @@ function UnoGame(){
             const pi=mpPlayerMapRef.current[conn.peer];
             if(pi!==undefined){
               const pName=mpPlayersRef.current.find(p=>p.id===conn.peer)?.name||"Gracz";
-              setPlayers(prev=>prev.map((p,i)=>i===pi?{...p,type:"ai",name:p.name+" (bot)"}:p));
+              setPlayers(prev=>prev.map((p,i)=>i===pi?{...p,type:"ai",name:p.name.endsWith("(bot)")?p.name:p.name+" (bot)"}:p));
               addLog(`${pName} rozlaczony - zastapiony botem`,"p");
               showToast(`${pName} rozlaczyl sie`,"warn");
             }
@@ -1847,12 +1830,10 @@ function UnoGame(){
     <div className="m-title" style={{fontSize:48}}>Dolacz</div>
     <div className="m-panel" style={{minWidth:380,maxWidth:440}}>
       <div className="m-lbl">Kod pokoju</div>
-      <div style={{display:"flex",gap:8}}>
-        <input className="m-inp" value={mpJoinCode} onChange={e=>setMpJoinCode(e.target.value.toUpperCase())} placeholder="np. ABC12" maxLength={5} style={{textAlign:"center",fontSize:20,letterSpacing:4,fontFamily:"Fredoka",flex:1,width:"auto",minWidth:0}}/>
-        <button className="btn-go" style={{margin:0,padding:"8px 20px",fontSize:14,minWidth:80}} onClick={mpJoinRoom} disabled={mpConnecting}>
-          {mpConnecting?<span className="mp-spin"/>:"DOLACZ"}
-        </button>
-      </div>
+      <input className="m-inp" value={mpJoinCode} onChange={e=>setMpJoinCode(e.target.value.toUpperCase())} placeholder="np. ABC12" maxLength={5} style={{textAlign:"center",fontSize:22,letterSpacing:6,fontFamily:"Fredoka",padding:"12px 16px",marginBottom:8}}/>
+      <button className="btn-go" style={{width:"100%",margin:0}} onClick={mpJoinRoom} disabled={mpConnecting}>
+        {mpConnecting?<span className="mp-spin"/>:"DOLACZ"}
+      </button>
       {mpError&&<div className="mp-err">{mpError}</div>}
 
       <div style={{margin:"16px 0 8px",borderTop:"1px solid rgba(255,255,255,.08)",paddingTop:12}}>
@@ -1941,7 +1922,7 @@ function UnoGame(){
           </div>
           <div className="chat-foot">
             <input ref={chatInputRef} className="chat-inp" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&chatInput.trim()){sendChat(chatInput);setChatInput("")}}} placeholder="Napisz... (T)" maxLength={200}/>
-            <button className="chat-send" onClick={()=>{if(chatInput.trim()){sendChat(chatInput);setChatInput("")}}}>\u27A4</button>
+            <button className="chat-send" onClick={()=>{if(chatInput.trim()){sendChat(chatInput);setChatInput("")}}}>{"\u27A4"}</button>
           </div>
         </div>
 
