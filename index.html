@@ -1334,37 +1334,6 @@ function UnoGame() {
     setRoundNum(r => r + 1);
     startGame();
   }, [startGame]);
-  const mpNextRound = useCallback(() => {
-    if (mpIsHost) {
-      // Sync mpPlayers: remove disconnected, keep only host + active connections
-      const activePeers = new Set(connsRef.current.filter(c => c.open).map(c => c.peer));
-      const syncedPlayers = mpPlayersRef.current.filter(p => p.isHost || activePeers.has(p.id));
-      setMpPlayers(syncedPlayers);
-      mpPlayersRef.current = syncedPlayers;
-      // Check all CONNECTED clients are ready (skip disconnected)
-      const connReady = connsRef.current.filter(c => c.open).every(c => mpReady[c.peer]);
-      if (!connReady && connsRef.current.some(c => c.open)) {
-        setMpError("Nie wszyscy gotowi!");
-        return;
-      }
-      if (syncedPlayers.length < 2) {
-        setMpError("Za malo graczy!");
-        return;
-      }
-      setConfetti(false);
-      setRoundNum(r => r + 1);
-      mpStartGame(true);
-    } else {
-      // Client: send ready signal
-      if (hostConnRef.current?.open) hostConnRef.current.send(JSON.stringify({
-        t: "mp_ready"
-      }));
-      setMpReady(prev => ({
-        ...prev,
-        me: true
-      }));
-    }
-  }, [mpIsHost, mpReady, mpStartGame]);
   const mpCleanup = useCallback(() => {
     connsRef.current.forEach(c => c.open && c.close());
     connsRef.current = [];
@@ -1387,37 +1356,6 @@ function UnoGame() {
     mpGameRef.current = false;
     mpCleanup();
   }, [mpCleanup]);
-
-  // Return to lobby (keep connections alive)
-  const mpReturnToLobby = useCallback(() => {
-    setConfetti(false);
-    setPlayers([]);
-    setRoundNum(1);
-    clearTimeout(unoTimer.current);
-    clearTimeout(aiTimer.current);
-    mpGameRef.current = false;
-    setMpReady({});
-    setSwapPicker(-1);
-    mpPlayerMapRef.current = {};
-    setPhase("MP_LOBBY");
-    // Rebuild lobby players from active connections only
-    const activePeerIds = new Set(connsRef.current.filter(c => c.open).map(c => c.peer));
-    const lobbyPls = mpPlayersRef.current.filter(p => p.isHost || activePeerIds.has(p.id)).map(p => ({
-      ...p,
-      ready: false
-    }));
-    setMpPlayers(lobbyPls);
-    mpPlayersRef.current = lobbyPls;
-    // Close stale connections
-    connsRef.current = connsRef.current.filter(c => c.open);
-    if (mpIsHost) {
-      mpBroadcast({
-        t: "return_lobby"
-      });
-      setTimeout(() => mpBroadcastLobby(lobbyPls), 300);
-    }
-    showToast("Wrocono do lobby", "info");
-  }, [mpIsHost, mpBroadcast, mpBroadcastLobby, showToast]);
 
   // Host: kick player during game
   const mpGameKick = useCallback(pi => {
@@ -1663,6 +1601,35 @@ function UnoGame() {
       rules: rules || undefined
     });
   }, [mpBroadcast]);
+
+  // Return to lobby (keep connections alive)
+  const mpReturnToLobby = useCallback(() => {
+    setConfetti(false);
+    setPlayers([]);
+    setRoundNum(1);
+    clearTimeout(unoTimer.current);
+    clearTimeout(aiTimer.current);
+    mpGameRef.current = false;
+    setMpReady({});
+    setSwapPicker(-1);
+    mpPlayerMapRef.current = {};
+    setPhase("MP_LOBBY");
+    const activePeerIds = new Set(connsRef.current.filter(c => c.open).map(c => c.peer));
+    const lobbyPls = mpPlayersRef.current.filter(p => p.isHost || activePeerIds.has(p.id)).map(p => ({
+      ...p,
+      ready: false
+    }));
+    setMpPlayers(lobbyPls);
+    mpPlayersRef.current = lobbyPls;
+    connsRef.current = connsRef.current.filter(c => c.open);
+    if (mpIsHost) {
+      mpBroadcast({
+        t: "return_lobby"
+      });
+      setTimeout(() => mpBroadcastLobby(lobbyPls), 300);
+    }
+    showToast("Wrocono do lobby", "info");
+  }, [mpIsHost, mpBroadcast, mpBroadcastLobby, showToast]);
 
   // Chat: send message
   const sendChat = useCallback(msg => {
@@ -2429,6 +2396,34 @@ function UnoGame() {
       setTimeout(dealNext, 100);
     }, 100);
   }, [mpIsHost, mpPlayers, mpRules, players, roundNum, addLog, snd, spawnFly, mpBroadcastGameState]);
+  const mpNextRound = useCallback(() => {
+    if (mpIsHost) {
+      const activePeers = new Set(connsRef.current.filter(c => c.open).map(c => c.peer));
+      const syncedPlayers = mpPlayersRef.current.filter(p => p.isHost || activePeers.has(p.id));
+      setMpPlayers(syncedPlayers);
+      mpPlayersRef.current = syncedPlayers;
+      const connReady = connsRef.current.filter(c => c.open).every(c => mpReady[c.peer]);
+      if (!connReady && connsRef.current.some(c => c.open)) {
+        setMpError("Nie wszyscy gotowi!");
+        return;
+      }
+      if (syncedPlayers.length < 2) {
+        setMpError("Za malo graczy!");
+        return;
+      }
+      setConfetti(false);
+      setRoundNum(r => r + 1);
+      mpStartGame(true);
+    } else {
+      if (hostConnRef.current?.open) hostConnRef.current.send(JSON.stringify({
+        t: "mp_ready"
+      }));
+      setMpReady(prev => ({
+        ...prev,
+        me: true
+      }));
+    }
+  }, [mpIsHost, mpReady, mpStartGame]);
 
   // Host: auto-broadcast game state when key state changes
   useEffect(() => {
