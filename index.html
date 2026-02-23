@@ -1805,7 +1805,13 @@ function UnoGame() {
       } else if (msg.t === "return_lobby") {
         mpGameRef.current = false;
         setPhase("MP_LOBBY");
-        showToast("Host wrocil do lobby", "info");
+        showToast("Host wymusil powrot do lobby", "warn");
+        setChatMsgs(prev => [...prev.slice(-50), {
+          name: "System",
+          emoji: "\u26A0\uFE0F",
+          msg: "Host wymusil powrot do lobby",
+          ts: Date.now()
+        }]);
         setPlayers([]);
         setConfetti(false);
       }
@@ -1857,13 +1863,14 @@ function UnoGame() {
                   spawnFly(ev.card || {}, false, from.x, from.y, to.x, to.y, 320);
                 }
               } else if (ev.e === "draw") {
-                // Cards drawn: fly from deck to player
+                // Cards drawn: fly from deck to player (self=face, others=back)
                 const n = pls.length;
                 const pk = ev.pi === 0 ? "b" : n === 2 ? "t" : n === 3 ? ev.pi === 1 ? "l" : "r" : ev.pi === 1 ? "l" : ev.pi === 2 ? "t" : "r";
                 const from = deckPos();
                 const to = screenPos(pk);
+                const isMe = ev.pi === 0;
                 for (let i = 0; i < (ev.n || 1); i++) {
-                  setTimeout(() => spawnFly({}, true, from.x, from.y, to.x + i * 8, to.y, 250), i * 100);
+                  setTimeout(() => spawnFly(isMe ? ev.cards && ev.cards[i] || {} : {}, !isMe, from.x, from.y, to.x + i * 8, to.y, 250), i * 100);
                 }
               } else if (ev.e === "deal") {
                 // Deal animation - show face for own cards, back for others
@@ -2060,6 +2067,7 @@ function UnoGame() {
         peer.on("open", () => {
           setupPeer(peer, slotCode);
           setMpConnecting(false);
+          setMpError("");
           setPhase("MP_LOBBY");
           addLog(`Pokoj ${slotCode} (publiczny) - P2P aktywny`, "a");
         });
@@ -2248,6 +2256,8 @@ function UnoGame() {
           if (rq.pi !== 0) delete rq.card; // strip card data for other players
           return rq;
         });
+        // Strip drawn card data for non-self draw events
+        if (re.e === "draw" && re.pi !== 0) delete re.cards;
         return re;
       });
       const state = {
@@ -2481,7 +2491,8 @@ function UnoGame() {
             e: "draw",
             pi,
             n: drawStack,
-            s: "pen"
+            s: "pen",
+            cards: r.drawn
           });
           setCurrent(nextActive(pi, direction, pls, podium));
           setTurnTimer(30);
@@ -2503,7 +2514,8 @@ function UnoGame() {
             e: "draw",
             pi,
             n: 1,
-            s: "draw"
+            s: "draw",
+            cards: r.drawn
           });
           const top = discardPile[discardPile.length - 1];
           if (canPlay(card, top, activeColor, 0)) setDrawnCard(card);else if (!gameRulesRef.current.drawUntilPlay) {
@@ -3112,7 +3124,8 @@ function UnoGame() {
         e: "draw",
         pi: 0,
         n: drawStack,
-        s: "pen"
+        s: "pen",
+        cards: r.drawn
       });
       setCurrent(nextActive(0, direction, pls, podium));
       setTurnTimer(30);
@@ -3138,7 +3151,8 @@ function UnoGame() {
       e: "draw",
       pi: 0,
       n: 1,
-      s: "draw"
+      s: "draw",
+      cards: r.drawn
     });
     if (canPlay(card, discardPile[discardPile.length - 1], activeColor, 0)) {
       if (gameRulesRef.current.forcePlay) {
@@ -3211,7 +3225,8 @@ function UnoGame() {
             e: "draw",
             pi: currentPlayer,
             n: drawStack,
-            s: "pen"
+            s: "pen",
+            cards: r.drawn
           });
           setCurrent(nextActive(currentPlayer, direction, pls, podium));
           setTurnTimer(30);
@@ -3240,7 +3255,8 @@ function UnoGame() {
             e: "draw",
             pi: currentPlayer,
             n: 1,
-            s: "draw"
+            s: "draw",
+            cards: r.drawn
           });
           if (canPlay(card, top, activeColor, 0)) {
             setPlayers(pls);
@@ -3279,6 +3295,16 @@ function UnoGame() {
     return () => clearInterval(iv);
   }, [phase, currentPlayer, podium, dealing, doDraw, mpIsHost, swapPicker]);
 
+  // Color picker auto-timeout: 7 seconds → random color
+  useEffect(() => {
+    if (colorPicker === null) return;
+    const t = setTimeout(() => {
+      const cols = ["red", "blue", "green", "yellow"];
+      pickColor(cols[Math.floor(Math.random() * 4)]);
+    }, 7000);
+    return () => clearTimeout(t);
+  }, [colorPicker, pickColor]);
+
   // Client: visual timer countdown (no auto-action, just display)
   useEffect(() => {
     if (!mpGameRef.current || mpIsHost) return;
@@ -3313,7 +3339,8 @@ function UnoGame() {
             e: "draw",
             pi: currentPlayer,
             n: drawStack,
-            s: "pen"
+            s: "pen",
+            cards: r.drawn
           });
           setCurrent(nextActive(currentPlayer, direction, pls, podium));
         } else {
@@ -3332,7 +3359,8 @@ function UnoGame() {
               e: "draw",
               pi: currentPlayer,
               n: 1,
-              s: "draw"
+              s: "draw",
+              cards: r.drawn
             });
           }
           setCurrent(nextActive(currentPlayer, direction, players, podium));
@@ -3384,7 +3412,30 @@ function UnoGame() {
     onChange: e => setPlayerName(e.target.value),
     placeholder: "Imie...",
     maxLength: 16
-  }), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn-go",
+    onClick: () => setPhase("SOLO_SETTINGS")
+  }, "GRA SOLO"), /*#__PURE__*/React.createElement("button", {
+    className: "btn-mp",
+    onClick: () => setPhase("MP_MODE")
+  }, "MULTIPLAYER"))));
+
+  // ═══════ SOLO SETTINGS ═══════
+  if (phase === "SOLO_SETTINGS") return /*#__PURE__*/React.createElement("div", {
+    className: "app"
+  }, /*#__PURE__*/React.createElement("style", null, CSS), /*#__PURE__*/React.createElement("div", {
+    className: "menu"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mp-back",
+    onClick: () => setPhase("MENU")
+  }, "\u2190 Wstecz"), /*#__PURE__*/React.createElement("div", {
+    className: "m-title",
+    style: {
+      fontSize: 48
+    }
+  }, "Solo"), /*#__PURE__*/React.createElement("div", {
+    className: "m-panel"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "m-lbl"
   }, "Gracze"), /*#__PURE__*/React.createElement("div", {
     className: "m-opts"
@@ -3424,10 +3475,7 @@ function UnoGame() {
   })))), /*#__PURE__*/React.createElement("button", {
     className: "btn-go",
     onClick: startGame
-  }, "GRA SOLO"), /*#__PURE__*/React.createElement("button", {
-    className: "btn-mp",
-    onClick: () => setPhase("MP_MODE")
-  }, "MULTIPLAYER"), /*#__PURE__*/React.createElement("button", {
+  }, "START"), /*#__PURE__*/React.createElement("button", {
     className: "btn-s",
     style: {
       width: "100%",
