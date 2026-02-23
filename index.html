@@ -716,7 +716,7 @@ function Card({
   }, card.symbol)));
 }
 function Confetti() {
-  const p = useMemo(() => {
+  var p = useMemo(() => {
     const c = ["#EF4444", "#3B82F6", "#22C55E", "#EAB308", "#A855F7", "#EC4899"];
     return Array.from({
       length: 40
@@ -1085,11 +1085,11 @@ function UnoGame() {
   }, [chatOpen, phase]);
 
   // Helpers
-  const addLog = useCallback((msg, type = "n") => setLog(prev => [...prev.slice(-30), {
+  var addLog = useCallback((msg, type = "n") => setLog(prev => [...prev.slice(-30), {
     msg,
     type
   }]), []);
-  const snd = useCallback(s => {
+  var snd = useCallback(s => {
     if (soundOn) {
       audio.current.init();
       audio.current.play(s);
@@ -1100,7 +1100,7 @@ function UnoGame() {
   }, [soundOn]);
 
   // Toast notification helper
-  const showToast = useCallback((msg, type = "info", dur = 3000) => {
+  var showToast = useCallback((msg, type = "info", dur = 3000) => {
     clearTimeout(toastTimer.current);
     setToast({
       msg,
@@ -1110,10 +1110,10 @@ function UnoGame() {
   }, []);
 
   // MP event helper - push event for client animations/sounds
-  const mpEvt = useCallback(evt => {
+  var mpEvt = useCallback(evt => {
     if (mpGameRef.current && mpIsHost) mpEventsRef.current.push(evt);
   }, [mpIsHost]);
-  const reshuffle = useCallback((deck, disc) => {
+  var reshuffle = useCallback((deck, disc) => {
     if (deck.length > 0) return {
       deck,
       disc
@@ -1127,7 +1127,7 @@ function UnoGame() {
       disc: [disc[disc.length - 1]]
     };
   }, []);
-  const drawCards = useCallback((count, deck, disc) => {
+  var drawCards = useCallback((count, deck, disc) => {
     let dk = [...deck],
       dd = [...disc];
     const drawn = [];
@@ -1145,7 +1145,7 @@ function UnoGame() {
       disc: dd
     };
   }, [reshuffle]);
-  const nextActive = useCallback((cur, dir, pls, pod, skip = 0) => {
+  var nextActive = useCallback((cur, dir, pls, pod, skip = 0) => {
     const n = pls.length;
     let i = cur,
       sk = skip;
@@ -1220,7 +1220,7 @@ function UnoGame() {
   }
 
   // Spawn fly animation
-  const spawnFly = useCallback((card, back, fx, fy, tx, ty, dur = 380) => {
+  var spawnFly = useCallback((card, back, fx, fy, tx, ty, dur = 380) => {
     const id = flyIdRef.current++;
     setFlyCards(prev => [...prev, {
       id,
@@ -1236,7 +1236,7 @@ function UnoGame() {
   }, []);
 
   // ═══════ START GAME ═══════
-  const startGame = useCallback(() => {
+  var startGame = useCallback(() => {
     mpGameRef.current = false; // ensure solo mode
     gameRulesRef.current = {
       ...mpRules,
@@ -1329,12 +1329,12 @@ function UnoGame() {
     };
     setTimeout(dealNext, 350);
   }, [playerName, numPlayers, difficulty, roundNum, addLog, snd, spawnFly]);
-  const nextRound = useCallback(() => {
+  var nextRound = useCallback(() => {
     setConfetti(false);
     setRoundNum(r => r + 1);
     startGame();
   }, [startGame]);
-  const mpCleanup = useCallback(() => {
+  var mpCleanup = useCallback(() => {
     connsRef.current.forEach(c => c.open && c.close());
     connsRef.current = [];
     if (hostConnRef.current) {
@@ -1346,7 +1346,7 @@ function UnoGame() {
       peerRef.current = null;
     }
   }, []);
-  const toMenu = useCallback(() => {
+  var toMenu = useCallback(() => {
     setConfetti(false);
     setPhase("MENU");
     setPlayers([]);
@@ -1358,7 +1358,7 @@ function UnoGame() {
   }, [mpCleanup]);
 
   // Host: kick player during game
-  const mpGameKick = useCallback(pi => {
+  var mpGameKick = useCallback(pi => {
     if (!mpIsHost) return;
     // Find peerId for this player index
     const peerId = Object.keys(mpPlayerMapRef.current).find(k => mpPlayerMapRef.current[k] === pi);
@@ -1382,7 +1382,7 @@ function UnoGame() {
   }, [mpIsHost, players, addLog, showToast]);
 
   // Host: send wake/warn to player
-  const mpPing = useCallback((pi, type) => {
+  var mpPing = useCallback((pi, type) => {
     if (!mpIsHost) return;
     const peerId = Object.keys(mpPlayerMapRef.current).find(k => mpPlayerMapRef.current[k] === pi);
     if (!peerId) return;
@@ -1434,7 +1434,7 @@ function UnoGame() {
   const hasCustomServer = PEER_HOST !== "0.peerjs.com";
 
   // Scan for public rooms
-  const mpScanRooms = useCallback(() => {
+  var mpScanRooms = useCallback(() => {
     if (scanning) return;
     setScanning(true);
     setPublicRooms([]);
@@ -1586,7 +1586,7 @@ function UnoGame() {
   }, [scanning, showToast]);
 
   // Host: broadcast message to all connected clients
-  const mpBroadcast = useCallback(msg => {
+  var mpBroadcast = useCallback(msg => {
     const str = JSON.stringify(msg);
     connsRef.current.forEach(c => {
       if (c.open) c.send(str);
@@ -1594,7 +1594,7 @@ function UnoGame() {
   }, []);
 
   // Host: broadcast lobby state
-  const mpBroadcastLobby = useCallback((pls, rules) => {
+  var mpBroadcastLobby = useCallback((pls, rules) => {
     mpBroadcast({
       t: "lobby",
       players: pls || mpPlayersRef.current,
@@ -1603,7 +1603,7 @@ function UnoGame() {
   }, [mpBroadcast]);
 
   // Return to lobby (keep connections alive)
-  const mpReturnToLobby = useCallback(() => {
+  var mpReturnToLobby = useCallback(() => {
     setConfetti(false);
     setPlayers([]);
     setRoundNum(1);
@@ -1632,7 +1632,7 @@ function UnoGame() {
   }, [mpIsHost, mpBroadcast, mpBroadcastLobby, showToast]);
 
   // Chat: send message
-  const sendChat = useCallback(msg => {
+  var sendChat = useCallback(msg => {
     if (!msg.trim()) return;
     const txt = msg.trim().slice(0, 200);
     const entry = {
@@ -1657,7 +1657,7 @@ function UnoGame() {
   }, [mpIsHost, playerName, mpBroadcast]);
 
   // Host: handle incoming message from a client
-  const mpHostHandleMsg = useCallback((data, connId) => {
+  var mpHostHandleMsg = useCallback((data, connId) => {
     try {
       const msg = typeof data === "string" ? JSON.parse(data) : data;
       if (msg.t === "join") {
@@ -1777,7 +1777,7 @@ function UnoGame() {
   }, [mpBroadcast, mpBroadcastLobby]);
 
   // Client: handle incoming message from host
-  const mpClientHandleMsg = useCallback(data => {
+  var mpClientHandleMsg = useCallback(data => {
     try {
       const msg = typeof data === "string" ? JSON.parse(data) : data;
       if (msg.t === "lobby") {
@@ -1932,7 +1932,7 @@ function UnoGame() {
   }, [mpCleanup, soundOn, spawnFly, snd, showToast]);
 
   // Create room (HOST)
-  const mpCreateRoom = useCallback(() => {
+  var mpCreateRoom = useCallback(() => {
     const name = playerName.trim() || "Gracz";
     setMpIsHost(true);
     setMpError("");
@@ -2079,7 +2079,7 @@ function UnoGame() {
   }, [playerName, addLog, mpHostHandleMsg, mpBroadcastLobby, mpCleanup, showToast, mpRules, mpPrivate]);
 
   // Join room (CLIENT)
-  const mpJoinRoom = useCallback(directCode => {
+  var mpJoinRoom = useCallback(directCode => {
     const code = (typeof directCode === "string" ? directCode : mpJoinCode).trim().toUpperCase();
     if (code.length < 3) {
       setMpError("Kod za krotki");
@@ -2156,7 +2156,7 @@ function UnoGame() {
   }, [mpJoinCode, playerName, mpClientHandleMsg, mpCleanup, showToast]);
 
   // Kick player (host)
-  const mpKick = useCallback(pid => {
+  var mpKick = useCallback(pid => {
     if (!mpIsHost) return;
     const conn = connsRef.current.find(c => c.peer === pid);
     if (conn && conn.open) conn.send(JSON.stringify({
@@ -2172,7 +2172,7 @@ function UnoGame() {
   }, [mpIsHost, mpBroadcastLobby]);
 
   // Toggle ready (client)
-  const mpToggleReady = useCallback(() => {
+  var mpToggleReady = useCallback(() => {
     if (mpIsHost) return;
     const me = mpPlayers.find(p => p.id === mpMyId);
     const newReady = !me?.ready;
@@ -2188,7 +2188,7 @@ function UnoGame() {
   }, [mpMyId, mpIsHost, mpPlayers]);
 
   // Update rule (host or pre-lobby)
-  const mpSetRule = useCallback((key, val) => {
+  var mpSetRule = useCallback((key, val) => {
     setMpRules(prev => {
       const nr = {
         ...prev,
@@ -2204,7 +2204,7 @@ function UnoGame() {
   }, [mpIsHost, mpBroadcast]);
 
   // Host: broadcast game state to all clients (rotated per-client view)
-  const mpBroadcastGameState = useCallback((pls, dk, disc, cur, dir, col, ds, lg, pod, dt, ph, rn, conf, ut, up, extraEvts) => {
+  var mpBroadcastGameState = useCallback((pls, dk, disc, cur, dir, col, ds, lg, pod, dt, ph, rn, conf, ut, up, extraEvts) => {
     if (!connsRef.current.length) return;
     const n = pls.length;
     // Grab and clear accumulated events
@@ -2277,7 +2277,7 @@ function UnoGame() {
   }, [mpReady, swapPicker]);
 
   // Start multiplayer game (host) - also used for next round
-  const mpStartGame = useCallback((isNextRound = false) => {
+  var mpStartGame = useCallback((isNextRound = false) => {
     if (!mpIsHost || mpPlayers.length < 2) return;
     if (!isNextRound && !mpPlayers.every(p => p.ready || p.isHost)) {
       setMpError("Nie wszyscy gotowi!");
@@ -2396,7 +2396,7 @@ function UnoGame() {
       setTimeout(dealNext, 100);
     }, 100);
   }, [mpIsHost, mpPlayers, mpRules, players, roundNum, addLog, snd, spawnFly, mpBroadcastGameState]);
-  const mpNextRound = useCallback(() => {
+  var mpNextRound = useCallback(() => {
     if (mpIsHost) {
       const activePeers = new Set(connsRef.current.filter(c => c.open).map(c => c.peer));
       const syncedPlayers = mpPlayersRef.current.filter(p => p.isHost || activePeers.has(p.id));
@@ -2536,7 +2536,7 @@ function UnoGame() {
   }, [mpIsHost, phase, currentPlayer, players, deckCards, discardPile, activeColor, drawStack, direction, podium, swapPicker, playCard, playMultiRemote, executeSwap, drawCards, nextActive, snd, addLog]);
 
   // ═══════ WIN CHECK ═══════
-  const checkWin = useCallback((pls, pod, pi) => {
+  var checkWin = useCallback((pls, pod, pi) => {
     if (pls[pi].hand.length > 0) return false;
     const newPod = [...pod, pi];
     setPodium(newPod);
@@ -2564,7 +2564,7 @@ function UnoGame() {
   }, [addLog, snd]);
 
   // ═══════ UNO TRIGGER ═══════
-  const triggerUno = useCallback((pi, pls) => {
+  var triggerUno = useCallback((pi, pls) => {
     if (pls[pi].hand.length !== 1) return;
     if (pls[pi].type === "ai" || pls[pi].type === "remote") {
       setTimeout(() => {
@@ -2621,7 +2621,7 @@ function UnoGame() {
   }, [unoPhase]);
 
   // Click static UNO button -> spawn jumper
-  const clickStaticUno = useCallback(() => {
+  var clickStaticUno = useCallback(() => {
     if (unoPhase !== "waiting") return;
     setUnoPhase("jumping");
     setUnoPos({
@@ -2631,7 +2631,7 @@ function UnoGame() {
   }, [unoPhase]);
 
   // Click jumping UNO button -> success
-  const clickJumpingUno = useCallback(() => {
+  var clickJumpingUno = useCallback(() => {
     clearTimeout(unoTimer.current);
     setUnoTarget(-1);
     setUnoPhase("idle");
@@ -2642,14 +2642,14 @@ function UnoGame() {
   }, [snd, addLog, players]);
 
   // Check if card can be played (respecting game rules)
-  const canPlayRuled = useCallback((c, top, col, stk) => {
+  var canPlayRuled = useCallback((c, top, col, stk) => {
     // If stack disabled and there's a draw stack, must draw (no play allowed)
     if (stk > 0 && !gameRulesRef.current.stackDraw) return false;
     return canPlay(c, top, col, stk);
   }, []);
 
   // ═══════ 7-0 RULE: SWAP & ROTATE ═══════
-  const executeSwap = useCallback((fromPi, toPi) => {
+  var executeSwap = useCallback((fromPi, toPi) => {
     setSwapPicker(-1);
     const pls = [...players];
     const fromHand = [...pls[fromPi].hand];
@@ -2680,7 +2680,7 @@ function UnoGame() {
   }, [players, direction, podium, nextActive, snd, addLog, mpEvt, triggerUno]);
 
   // ═══════ PLAY CARD ═══════
-  const playCard = useCallback((pi, cardIdx, chosenColor = null) => {
+  var playCard = useCallback((pi, cardIdx, chosenColor = null) => {
     if (processingRef.current) return;
     processingRef.current = true;
     const pls = [...players];
@@ -2851,7 +2851,7 @@ function UnoGame() {
   }, [players, discardPile, deckCards, activeColor, direction, drawStack, podium, unoTarget, unoPhase, nextActive, checkWin, triggerUno, executeSwap, snd, addLog, spawnFly, mpEvt]);
 
   // ═══════ MULTI PLAY (shift select) ═══════
-  const playMulti = useCallback((indices, chosenColor = null) => {
+  var playMulti = useCallback((indices, chosenColor = null) => {
     if (!indices.length) return;
     const pls = [...players];
     const player = {
@@ -2901,7 +2901,7 @@ function UnoGame() {
   }, [players, discardPile, deckCards, activeColor, direction, podium, nextActive, checkWin, triggerUno, snd, addLog, spawnFly, mpEvt]);
 
   // ═══════ MULTI PLAY REMOTE (any player) ═══════
-  const playMultiRemote = useCallback((pi, indices, chosenColor = null) => {
+  var playMultiRemote = useCallback((pi, indices, chosenColor = null) => {
     if (!indices.length) return;
     const pls = [...players];
     const player = {
@@ -2950,11 +2950,11 @@ function UnoGame() {
   }, [players, discardPile, activeColor, direction, podium, nextActive, checkWin, triggerUno, snd, addLog, spawnFly, mpEvt]);
 
   // ═══════ CLICK CARD ═══════
-  const sendToHost = useCallback(msg => {
+  var sendToHost = useCallback(msg => {
     if (hostConnRef.current?.open) hostConnRef.current.send(JSON.stringify(msg));
   }, []);
-  const isClient = useCallback(() => mpGameRef.current && !mpIsHost, [mpIsHost]);
-  const clickCard = useCallback(idx => {
+  var isClient = useCallback(() => mpGameRef.current && !mpIsHost, [mpIsHost]);
+  var clickCard = useCallback(idx => {
     if (phase !== "PLAY" || currentPlayer !== 0 || aiThinking >= 0 || podium.includes(0) || dealing || processingRef.current) return;
     const card = players[0].hand[idx];
     const topCard = discardPile[discardPile.length - 1];
@@ -3001,7 +3001,7 @@ function UnoGame() {
     }
     playCard(0, idx);
   }, [phase, currentPlayer, players, discardPile, activeColor, drawStack, aiThinking, shiftHeld, selected, podium, dealing, playCard, snd, isClient, sendToHost]);
-  const execMulti = useCallback(() => {
+  var execMulti = useCallback(() => {
     if (!selected.length) return;
     const first = players[0].hand[selected[0]];
     if (isClient()) {
@@ -3022,7 +3022,7 @@ function UnoGame() {
     }
     playMulti(selected);
   }, [selected, players, playMulti, isClient, sendToHost]);
-  const playDrawnCard = useCallback(() => {
+  var playDrawnCard = useCallback(() => {
     if (!drawnCard) return;
     if (isClient()) {
       const idx = players[0].hand.length - 1;
@@ -3043,7 +3043,7 @@ function UnoGame() {
     }
     playCard(0, idx);
   }, [drawnCard, players, playCard, isClient, sendToHost]);
-  const pickColor = useCallback(c => {
+  var pickColor = useCallback(c => {
     if (colorPicker === null) return;
     if (isClient()) {
       if (colorPicker === "drawn_remote") {
@@ -3082,7 +3082,7 @@ function UnoGame() {
   }, [colorPicker, currentPlayer, selected, playCard, playMulti, isClient, sendToHost]);
 
   // ═══════ DRAW ═══════
-  const doDraw = useCallback(() => {
+  var doDraw = useCallback(() => {
     if (phase !== "PLAY" || currentPlayer !== 0 || aiThinking >= 0 || podium.includes(0) || dealing || processingRef.current) return;
     if (isClient()) {
       processingRef.current = true;
@@ -3155,7 +3155,7 @@ function UnoGame() {
     }
     // drawUntilPlay: player stays on turn, must click deck again
   }, [phase, currentPlayer, aiThinking, drawStack, deckCards, discardPile, players, activeColor, direction, podium, dealing, drawCards, nextActive, playCard, snd, addLog, spawnFly, mpEvt, showToast, isClient, sendToHost]);
-  const passDraw = useCallback(() => {
+  var passDraw = useCallback(() => {
     if (isClient()) {
       sendToHost({
         t: "pass"
@@ -3351,7 +3351,7 @@ function UnoGame() {
   const myFinished = podium.includes(0);
   const isMyTurn = phase === "PLAY" && currentPlayer === 0 && aiThinking < 0 && !myFinished && !dealing && !processingRef.current && swapPicker < 0;
   const canPlayAny = myHand.some(c => topCard && canPlayRuled(c, topCard, activeColor, drawStack));
-  const hasDuplicates = useMemo(() => {
+  var hasDuplicates = useMemo(() => {
     const seen = {};
     for (const c of myHand) {
       if (c.type !== "number") continue;
