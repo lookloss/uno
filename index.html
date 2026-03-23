@@ -384,7 +384,7 @@ const genCode = () => {
   for (let i = 0; i < 5; i++) s += c[Math.floor(Math.random() * c.length)];
   return s;
 };
-const MP_EMOJIS = ["\uD83D\uDE0E", "\uD83E\uDD16", "\uD83D\uDC7E", "\uD83C\uDFAD"];
+const MP_EMOJIS = ["\uD83D\uDE0E", "\uD83E\uDD29", "\uD83D\uDE0D", "\uD83E\uDD73"];
 
 // ═══════ AUDIO ═══════
 class SndEngine {
@@ -1074,11 +1074,20 @@ function UnoGame() {
     const up = e => {
       if (e.key === "Shift") setShiftHeld(false);
     };
+    const onBlur = () => setShiftHeld(false);
+    const onVis = () => { if (document.hidden) { setShiftHeld(false); setSelected([]); } };
+    const onUnload = () => { if (peerRef.current) peerRef.current.destroy(); };
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("visibilitychange", onVis);
     window.addEventListener("keydown", dn);
+    window.addEventListener("beforeunload", onUnload);
     window.addEventListener("keyup", up);
     return () => {
       window.removeEventListener("keydown", dn);
       window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("beforeunload", onUnload);
     };
   }, [chatOpen, phase]);
 
@@ -1638,7 +1647,7 @@ function UnoGame() {
         const np = [...cur, {
           id: connId,
           name: msg.name || "Gracz",
-          emoji: MP_EMOJIS[cur.length] || PEMOJI,
+          emoji: msg.emoji || MP_EMOJIS[cur.length] || PEMOJI,
           isHost: false,
           ready: false
         }];
@@ -2036,12 +2045,21 @@ function UnoGame() {
         setPhase("MP_LOBBY");
         c.send(JSON.stringify({
           t: "join",
-          name
+          name,
+          emoji: PEMOJI
         }));
         c.on("data", d => mpClientHandleMsg(d));
         c.on("close", () => {
           if (hostConnRef.current === c) {
             setMpError("Polaczenie utracone");
+            showToast("Polaczenie z hostem utracone", "err");
+            setPhase("MP_MODE");
+            mpCleanup();
+          }
+        });
+        c.on("error", () => {
+          if (hostConnRef.current === c) {
+            setMpError("Blad polaczenia");
             showToast("Polaczenie z hostem utracone", "err");
             setPhase("MP_MODE");
             mpCleanup();
@@ -2360,9 +2378,9 @@ function UnoGame() {
     if (phase !== "PLAY" && phase !== "END" && phase !== "OVER" && phase !== "MP_ROUND_END" && phase !== "MP_OVER") return;
     const ver = ++stateVerRef.current;
     const tid = setTimeout(() => {
-      if (stateVerRef.current !== ver) return; // debounce
+      if (stateVerRef.current !== ver) return;
       mpBroadcastGameState(players, deckCards, discardPile, currentPlayer, direction, activeColor, drawStack, logEntries, podium, drawnCard, phase, roundNum, confetti, unoTarget, unoPhase);
-    }, 100);
+    }, 30);
     return () => clearTimeout(tid);
   }, [mpIsHost, phase, players, currentPlayer, discardPile, activeColor, drawStack, direction, podium, drawnCard, logEntries, deckCards, roundNum, confetti, unoTarget, unoPhase, swapPicker, dealing, mpBroadcastGameState]);
 
@@ -2553,16 +2571,17 @@ function UnoGame() {
 
   // Click static UNO button -> spawn jumper
   var clickStaticUno = useCallback(() => {
-    if (unoPhase !== "waiting") return;
+    if (unoPhase !== "waiting" || unoTarget !== 0) return;
     setUnoPhase("jumping");
     setUnoPos({
       x: 20 + Math.random() * 60,
       y: 15 + Math.random() * 50
     });
-  }, [unoPhase]);
+  }, [unoPhase, unoTarget]);
 
   // Click jumping UNO button -> success
   var clickJumpingUno = useCallback(() => {
+    if (unoTarget !== 0) return;
     clearTimeout(unoTimer.current);
     setUnoTarget(-1);
     setUnoPhase("idle");
@@ -2570,7 +2589,7 @@ function UnoGame() {
     snd("uno");
     addLog(`${players[0]?.name || "Gracz"} UNO!`, "u");
     setTimeout(() => setUnoFlash(false), 1000);
-  }, [snd, addLog, players]);
+  }, [snd, addLog, players, unoTarget]);
 
   // Check if card can be played (respecting game rules)
   var canPlayRuled = useCallback((c, top, col, stk) => {
@@ -2924,6 +2943,7 @@ function UnoGame() {
       return;
     }
     if (isClient()) {
+      setTimeout(() => { processingRef.current = false; }, 3000);
       sendToHost({
         t: "play",
         cardIdx: idx
@@ -3017,6 +3037,7 @@ function UnoGame() {
     if (phase !== "PLAY" || currentPlayer !== 0 || aiThinking >= 0 || podium.includes(0) || dealing || processingRef.current) return;
     if (isClient()) {
       processingRef.current = true;
+      setTimeout(() => { processingRef.current = false; }, 3000);
       sendToHost({
         t: "draw"
       });
@@ -3311,8 +3332,8 @@ function UnoGame() {
   const timerPct = turnTimer / 30 * 100;
   const timerColor = turnTimer > 15 ? "#22C55E" : turnTimer > 7 ? "#EAB308" : "#EF4444";
   const unoProgress = unoTarget >= 0 ? unoCountdown / (gameRulesRef.current.unoTime || 5) : 0;
-  const unoWaiting = unoPhase === "waiting";
-  const unoJumping = unoPhase === "jumping";
+  const unoWaiting = unoPhase === "waiting" && unoTarget === 0;
+  const unoJumping = unoPhase === "jumping" && unoTarget === 0;
 
   // ═══════ MENU ═══════
   if (phase === "MENU") return /*#__PURE__*/React.createElement("div", {
@@ -4186,8 +4207,13 @@ function UnoGame() {
       card: c
     }));
   }), drawStack > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "d-stk"
-  }, "+", drawStack)), /*#__PURE__*/React.createElement("div", {
+    className: "d-stk",
+    style: isMyTurn ? {cursor:"pointer",animation:"pulse 1s infinite"} : {},
+    onClick: isMyTurn ? doDraw : undefined
+  }, "+", drawStack), isMyTurn && drawStack > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {color:"#EF4444",fontWeight:700,fontSize:13,marginTop:6,textAlign:"center",animation:"pulse 1s infinite",cursor:"pointer"},
+    onClick: doDraw
+  }, "\u25B6 Dobierz ", drawStack)), /*#__PURE__*/React.createElement("div", {
     className: "col-ind",
     key: activeColor
   }, /*#__PURE__*/React.createElement("div", {
@@ -4201,7 +4227,7 @@ function UnoGame() {
     style: {
       color: COLORS[activeColor] || "#aaa"
     }
-  }, CNAMES[activeColor] || "?"), phase === "PLAY" && !myFinished && /*#__PURE__*/React.createElement("div", {
+  }, CNAMES[activeColor] || "?"), phase === "PLAY" && !myFinished && unoTarget === 0 && /*#__PURE__*/React.createElement("div", {
     className: "uno-static"
   }, /*#__PURE__*/React.createElement("div", {
     className: `uno-pill ${unoWaiting ? "active" : ""}`,
