@@ -6,9 +6,6 @@
 <title>UNO</title>
 <style>
 html,body,#root{margin:0;padding:0;width:100%;height:100%;overflow:hidden}
-
-html,body,#root{margin:0;padding:0;width:100%;height:100%;overflow:hidden}
-
 </style>
 </head>
 <body>
@@ -323,6 +320,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
 //# sourceMappingURL=peerjs.min.js.map
 </script>
 <script>
+
 const {
   useState,
   useEffect,
@@ -1396,12 +1394,25 @@ function UnoGame() {
 
   // ═══════ MULTIPLAYER NETWORKING (PeerJS P2P) ═══════
   const PEER_PREFIX = "UNOG-";
-  // Custom PeerJS server - set window.PEER_HOST before loading to use your own server
-  // Deploy: https://github.com/peers/peerjs-server on Render.com (free)
-  const PEER_HOST = window.PEER_HOST || "0.peerjs.com";
-  const PEER_PORT = window.PEER_PORT || (PEER_HOST === "0.peerjs.com" ? 443 : 443);
-  const PEER_PATH = window.PEER_PATH || (PEER_HOST === "0.peerjs.com" ? "/" : "/");
-  const PEER_SECURE = PEER_HOST !== "localhost";
+  // Custom PeerJS server config (saved in localStorage)
+  const [serverUrl, setServerUrl] = useState(() => localStorage.getItem("uno_server") || "");
+  var parsedServer = useMemo(() => {
+    if (!serverUrl) return null;
+    try {
+      let u = serverUrl.trim();
+      if (!u.startsWith("http")) u = "https://" + u;
+      const url = new URL(u);
+      return {
+        host: url.hostname,
+        port: parseInt(url.port) || 443,
+        path: "/peer/",
+        secure: url.protocol === "https:"
+      };
+    } catch (e) {
+      return null;
+    }
+  }, [serverUrl]);
+  const hasServer = !!parsedServer;
   const ICE_SERVERS = [{
     urls: "stun:stun.relay.metered.ca:80"
   }, {
@@ -1421,125 +1432,70 @@ function UnoGame() {
     username: "013826048e4d7e865544af4e",
     credential: "kP0bBbisGd9H6AKB"
   }];
-  const PEER_CFG = {
-    debug: 0,
-    host: PEER_HOST,
-    port: PEER_PORT,
-    path: PEER_PATH,
-    secure: PEER_SECURE,
-    config: {
-      iceServers: ICE_SERVERS
-    }
+  var PEER_CFG = useMemo(() => {
+    if (parsedServer) return {
+      debug: 0,
+      host: parsedServer.host,
+      port: parsedServer.port,
+      path: parsedServer.path,
+      secure: parsedServer.secure,
+      config: {
+        iceServers: ICE_SERVERS
+      }
+    };
+    return {
+      debug: 0,
+      config: {
+        iceServers: ICE_SERVERS
+      }
+    }; // PeerJS cloud fallback
+  }, [parsedServer]);
+  const saveServer = url => {
+    setServerUrl(url);
+    if (url) localStorage.setItem("uno_server", url);else localStorage.removeItem("uno_server");
   };
-  const hasCustomServer = PEER_HOST !== "0.peerjs.com";
+  const [serverStatus, setServerStatus] = useState("?"); // "ok","err","?"
 
   // Scan for public rooms
   var mpScanRooms = useCallback(() => {
     if (scanning) return;
+    if (!hasServer) {
+      showToast("Skanowanie wymaga serwera - dolacz przez kod", "info", 3000);
+      setScanning(false);
+      return;
+    }
     setScanning(true);
     setPublicRooms([]);
-    if (hasCustomServer) {
-      // Custom server: use REST API (fast, reliable)
-      const proto = PEER_SECURE ? "https" : "http";
-      const url = `${proto}://${PEER_HOST}:${PEER_PORT}${PEER_PATH}peerjs/peers`;
-      fetch(url).then(r => r.json()).then(peers => {
-        const rooms = (peers || []).filter(id => id.startsWith(PEER_PREFIX) && !id.startsWith(PEER_PREFIX + "X"));
-        if (!rooms.length) {
-          setScanning(false);
-          showToast("Nie znaleziono pokoi", "info", 2000);
-          return;
-        }
-        const tmpPeer = new Peer(undefined, PEER_CFG);
-        tmpPeer.on("open", () => {
-          let found = [];
-          let done = 0;
-          const finish = () => {
-            setPublicRooms([...found]);
-            setScanning(false);
-            setTimeout(() => {
-              try {
-                tmpPeer.destroy();
-              } catch (e) {}
-            }, 300);
-          };
-          rooms.forEach(rid => {
-            const conn = tmpPeer.connect(rid, {
-              reliable: true
-            });
-            const timeout = setTimeout(() => {
-              done++;
-              if (done >= rooms.length) finish();
-            }, 3000);
-            conn.on("open", () => {
-              conn.send(JSON.stringify({
-                t: "probe"
-              }));
-              conn.on("data", d => {
-                try {
-                  const msg = typeof d === "string" ? JSON.parse(d) : d;
-                  if (msg.t === "room_info" && !msg.isPrivate) {
-                    found.push({
-                      code: rid.replace(PEER_PREFIX, ""),
-                      name: msg.name,
-                      players: msg.players,
-                      max: msg.max
-                    });
-                    setPublicRooms([...found]);
-                  }
-                } catch (e) {}
-                clearTimeout(timeout);
-                conn.close();
-                done++;
-                if (done >= rooms.length) finish();
-              });
-            });
-            conn.on("error", () => {
-              clearTimeout(timeout);
-              done++;
-              if (done >= rooms.length) finish();
-            });
-          });
-        });
-        tmpPeer.on("error", () => {
-          setScanning(false);
-        });
-      }).catch(() => {
+    const s = parsedServer;
+    const proto = s.secure ? "https" : "http";
+    const url = `${proto}://${s.host}${s.port !== 443 && s.port !== 80 ? ":" + s.port : ""}${s.path}peerjs/peers`;
+    fetch(url).then(r => r.json()).then(peers => {
+      const rooms = (peers || []).filter(id => id.startsWith(PEER_PREFIX) && !id.startsWith(PEER_PREFIX + "X"));
+      if (!rooms.length) {
         setScanning(false);
-        showToast("Blad skanowania", "err", 2000);
-      });
-    } else {
-      // PeerJS cloud fallback: probe slot IDs (P01-P15)
-      const SLOTS = 15;
+        showToast("Nie znaleziono pokoi", "info", 2000);
+        return;
+      }
       const tmpPeer = new Peer(undefined, PEER_CFG);
-      let destroyed = false;
-      const cleanup = () => {
-        if (!destroyed) {
-          destroyed = true;
-          try {
-            tmpPeer.destroy();
-          } catch (e) {}
-        }
-      };
       tmpPeer.on("open", () => {
         let found = [];
         let done = 0;
         const finish = () => {
           setPublicRooms([...found]);
           setScanning(false);
-          setTimeout(cleanup, 300);
+          setTimeout(() => {
+            try {
+              tmpPeer.destroy();
+            } catch (e) {}
+          }, 300);
         };
-        for (let i = 1; i <= SLOTS; i++) {
-          const slotId = PEER_PREFIX + "P" + String(i).padStart(2, "0");
-          const conn = tmpPeer.connect(slotId, {
+        rooms.forEach(rid => {
+          const conn = tmpPeer.connect(rid, {
             reliable: true
           });
           const timeout = setTimeout(() => {
-            try {
-              conn.close();
-            } catch (e) {}
-            ;
             done++;
-            if (done >= SLOTS) finish();
+            if (done >= rooms.length) finish();
           }, 3000);
           conn.on("open", () => {
             conn.send(JSON.stringify({
@@ -1548,9 +1504,9 @@ function UnoGame() {
             conn.on("data", d => {
               try {
                 const msg = typeof d === "string" ? JSON.parse(d) : d;
-                if (msg.t === "room_info") {
+                if (msg.t === "room_info" && !msg.isPrivate) {
                   found.push({
-                    code: slotId.replace(PEER_PREFIX, ""),
+                    code: rid.replace(PEER_PREFIX, ""),
                     name: msg.name,
                     players: msg.players,
                     max: msg.max
@@ -1559,31 +1515,26 @@ function UnoGame() {
                 }
               } catch (e) {}
               clearTimeout(timeout);
-              try {
-                conn.close();
-              } catch (e) {}
-              ;
+              conn.close();
               done++;
-              if (done >= SLOTS) finish();
+              if (done >= rooms.length) finish();
             });
           });
           conn.on("error", () => {
             clearTimeout(timeout);
             done++;
-            if (done >= SLOTS) finish();
+            if (done >= rooms.length) finish();
           });
-        }
+        });
       });
       tmpPeer.on("error", () => {
         setScanning(false);
-        cleanup();
       });
-      setTimeout(() => {
-        setScanning(false);
-        cleanup();
-      }, 8000);
-    }
-  }, [scanning, showToast]);
+    }).catch(() => {
+      setScanning(false);
+      showToast("Serwer niedostepny", "err", 2000);
+    });
+  }, [scanning, showToast, hasServer, parsedServer, PEER_CFG]);
 
   // Host: broadcast message to all connected clients
   var mpBroadcast = useCallback(msg => {
@@ -2014,7 +1965,7 @@ function UnoGame() {
       });
     };
     if (mpPrivate) {
-      // Private: random 5-char code, prefix X
+      // Private: random 5-char code, prefix X - works with any server
       const code = genCode();
       const peerId = PEER_PREFIX + "X" + code;
       const peer = new Peer(peerId, PEER_CFG);
@@ -2032,8 +1983,8 @@ function UnoGame() {
         } else setMpError("Blad: " + err.type);
         setMpConnecting(false);
       });
-    } else if (hasCustomServer) {
-      // Custom server + public: random code, no prefix X
+    } else {
+      // Public: random code, no prefix X
       const code = genCode();
       const peerId = PEER_PREFIX + code;
       const peer = new Peer(peerId, PEER_CFG);
@@ -2051,40 +2002,8 @@ function UnoGame() {
         } else setMpError("Blad: " + err.type);
         setMpConnecting(false);
       });
-    } else {
-      // PeerJS cloud + public: slot-based (P01-P15)
-      const SLOTS = 15;
-      let slotNum = 1;
-      const trySlot = () => {
-        if (slotNum > SLOTS) {
-          setMpError("Brak wolnych slotow!");
-          setMpConnecting(false);
-          return;
-        }
-        const slotCode = "P" + String(slotNum).padStart(2, "0");
-        const peerId = PEER_PREFIX + slotCode;
-        const peer = new Peer(peerId, PEER_CFG);
-        peer.on("open", () => {
-          setupPeer(peer, slotCode);
-          setMpConnecting(false);
-          setMpError("");
-          setPhase("MP_LOBBY");
-          addLog(`Pokoj ${slotCode} (publiczny) - P2P aktywny`, "a");
-        });
-        peer.on("error", err => {
-          if (err.type === "unavailable-id") {
-            peer.destroy();
-            slotNum++;
-            trySlot();
-          } else {
-            setMpError("Blad: " + err.type);
-            setMpConnecting(false);
-          }
-        });
-      };
-      trySlot();
     }
-  }, [playerName, addLog, mpHostHandleMsg, mpBroadcastLobby, mpCleanup, showToast, mpRules, mpPrivate]);
+  }, [playerName, addLog, mpHostHandleMsg, mpBroadcastLobby, mpCleanup, showToast, mpRules, mpPrivate, hasServer, PEER_CFG]);
 
   // Join room (CLIENT)
   var mpJoinRoom = useCallback(directCode => {
@@ -3574,6 +3493,61 @@ function UnoGame() {
     placeholder: "Imie...",
     maxLength: 16
   }), /*#__PURE__*/React.createElement("div", {
+    className: "lobby-section",
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lobby-section-title",
+    style: {
+      fontSize: 10
+    }
+  }, "Serwer (Render.com URL)"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "m-inp",
+    style: {
+      flex: 1,
+      margin: 0,
+      fontSize: 11
+    },
+    value: serverUrl,
+    onChange: e => saveServer(e.target.value),
+    placeholder: "np. uno-server-xxxx.onrender.com"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn-s",
+    style: {
+      padding: "8px 12px",
+      fontSize: 11,
+      whiteSpace: "nowrap"
+    },
+    onClick: () => {
+      if (!parsedServer) {
+        setServerStatus("err");
+        return;
+      }
+      setServerStatus("...");
+      const s = parsedServer;
+      const proto = s.secure ? "https" : "http";
+      fetch(`${proto}://${s.host}${s.port !== 443 && s.port !== 80 ? ":" + s.port : ""}/health`).then(r => {
+        if (r.ok) setServerStatus("ok");else setServerStatus("err");
+      }).catch(() => setServerStatus("err"));
+    }
+  }, "Test"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 16
+    }
+  }, serverStatus === "ok" ? "\u2705" : serverStatus === "err" ? "\u274C" : serverStatus === "..." ? "\u23F3" : "\u2753")), !hasServer && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: "#EAB308",
+      fontSize: 10,
+      marginTop: 4
+    }
+  }, "Bez serwera: tylko prywatne pokoje (kod). Z serwerem: publiczne + wyszukiwanie.")), /*#__PURE__*/React.createElement("div", {
     className: "mp-mode-btns"
   }, /*#__PURE__*/React.createElement("div", {
     className: "mp-mode-btn",
@@ -4648,6 +4622,7 @@ function UnoGame() {
   }, "Zamknij"))))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(UnoGame));
+
 
 </script>
 </body>
