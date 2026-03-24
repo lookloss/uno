@@ -1404,13 +1404,30 @@ function UnoGame() {
   // ═══════ MULTIPLAYER NETWORKING (PeerJS P2P) ═══════
   const PEER_PREFIX = "UNOG-";
   // Custom PeerJS server config (saved in localStorage)
-  const [serverUrl, setServerUrl] = useState(() => localStorage.getItem("uno_server") || "");
+  const [serverUrl, setServerUrl] = useState(() => {
+    const saved = localStorage.getItem("uno_server") || "";
+    // Validate saved URL on load - clear if invalid
+    if (saved) {
+      try {
+        let u = saved.trim();
+        if (!u.startsWith("http")) u = "https://" + u;
+        const url = new URL(u);
+        if (!url.hostname || !url.hostname.includes(".") || url.hostname.length < 4) {
+          localStorage.removeItem("uno_server");
+          return "";
+        }
+      } catch(e) { localStorage.removeItem("uno_server"); return ""; }
+    }
+    return saved;
+  });
   var parsedServer = useMemo(() => {
     if (!serverUrl) return null;
     try {
       let u = serverUrl.trim();
+      if (!u) return null;
       if (!u.startsWith("http")) u = "https://" + u;
       const url = new URL(u);
+      if (!url.hostname || !url.hostname.includes(".") || url.hostname.length < 4) return null;
       return {
         host: url.hostname,
         port: parseInt(url.port) || 443,
@@ -1460,8 +1477,9 @@ function UnoGame() {
     }; // PeerJS cloud fallback
   }, [parsedServer]);
   const saveServer = url => {
-    setServerUrl(url);
-    if (url) localStorage.setItem("uno_server", url);else localStorage.removeItem("uno_server");
+    const trimmed = (url || "").trim();
+    setServerUrl(trimmed);
+    if (trimmed) localStorage.setItem("uno_server", trimmed);else localStorage.removeItem("uno_server");
   };
   const [serverStatus, setServerStatus] = useState("?"); // "ok","err","?"
 
