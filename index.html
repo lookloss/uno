@@ -14,7 +14,7 @@ html,body,#root{margin:0;padding:0;width:100%;height:100%;overflow:hidden}
  * @license React
  * react.production.min.js
  *
- * Copyright (c) Facebok, Inc. and its affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -920,6 +920,48 @@ const CSS = `
 .hp-wake{background:rgba(59,130,246,.2);border:1px solid rgba(59,130,246,.3);color:#3B82F6}.hp-wake:hover{background:rgba(59,130,246,.35)}
 .hp-warn{background:rgba(234,179,8,.2);border:1px solid rgba(234,179,8,.3);color:#EAB308}.hp-warn:hover{background:rgba(234,179,8,.35)}
 .hp-kick{background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.3);color:#EF4444}.hp-kick:hover{background:rgba(239,68,68,.35)}
+.cheat-ov{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:300;background:rgba(10,5,20,.97);border:1px solid rgba(168,85,247,.3);border-radius:16px;padding:20px 24px;min-width:320px;backdrop-filter:blur(12px);box-shadow:0 0 40px rgba(168,85,247,.15)}
+.cheat-title{color:#A855F7;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:2px;margin-bottom:12px;font-family:'Fredoka',sans-serif;text-align:center}
+.cheat-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.cheat-lbl{color:rgba(255,255,255,.5);font-size:11px;min-width:60px;text-transform:uppercase;letter-spacing:1px}
+.cheat-sel{flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:6px 8px;color:#fff;font-size:12px;font-family:'Outfit',sans-serif;outline:none}
+.cheat-sel:focus{border-color:rgba(168,85,247,.5)}
+.cheat-sel option{background:#1a1a2e;color:#fff}
+.cheat-go{width:100%;padding:10px;border-radius:8px;border:none;background:linear-gradient(135deg,#7C3AED,#A855F7);color:#fff;font-weight:700;font-size:13px;cursor:pointer;font-family:'Fredoka',sans-serif;letter-spacing:1px;margin-top:8px;transition:all .2s}
+.cheat-go:hover{transform:scale(1.02);box-shadow:0 0 20px rgba(168,85,247,.3)}
+.cheat-go.red{background:linear-gradient(135deg,#DC2626,#EF4444)}
+.cheat-go.green{background:linear-gradient(135deg,#16A34A,#22C55E)}
+.cheat-go.blue{background:linear-gradient(135deg,#2563EB,#3B82F6)}
+.cheat-go.orange{background:linear-gradient(135deg,#EA580C,#F97316)}
+.cheat-tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}
+.cheat-tab{padding:5px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.5);font-size:10px;cursor:pointer;font-family:'Outfit',sans-serif;transition:all .2s}
+.cheat-tab:hover{background:rgba(255,255,255,.08)}
+.cheat-tab.act{background:rgba(168,85,247,.2);border-color:rgba(168,85,247,.4);color:#A855F7}
+.cheat-quick{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.cheat-qbtn{padding:8px 6px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.7);font-size:11px;cursor:pointer;text-align:center;transition:all .2s;font-family:'Outfit',sans-serif}
+.cheat-qbtn:hover{background:rgba(255,255,255,.1);transform:scale(1.03)}
+.cheat-peek{max-height:200px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:3px;padding:8px;background:rgba(0,0,0,.3);border-radius:8px;margin-top:8px}
+.cheat-minicard{width:32px;height:44px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;cursor:pointer;border:2px solid transparent;transition:all .15s}
+.cheat-minicard:hover{transform:scale(1.15);z-index:1}
+.cheat-minicard.sel{border-color:#A855F7;box-shadow:0 0 8px rgba(168,85,247,.5)}
+.cheat-close{position:absolute;top:10px;right:14px;color:rgba(255,255,255,.4);font-size:18px;cursor:pointer;background:none;border:none}
+.cheat-close:hover{color:#fff}
+.cheat-trigger{background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.3);color:#A855F7;padding:4px 10px;border-radius:5px;font-size:9px;cursor:pointer;font-family:'Outfit',sans-serif;margin-top:10px;width:100%;text-align:center;letter-spacing:1px;text-transform:uppercase}.cheat-trigger:hover{background:rgba(168,85,247,.3)}
+.cheat-tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}
+.cheat-tab{padding:5px 10px;border-radius:6px;font-size:10px;cursor:pointer;border:1px solid rgba(168,85,247,.2);background:rgba(168,85,247,.08);color:rgba(168,85,247,.6);font-family:'Outfit',sans-serif;transition:all .2s;letter-spacing:.5px}
+.cheat-tab:hover{background:rgba(168,85,247,.15)}
+.cheat-tab.act{background:rgba(168,85,247,.25);border-color:rgba(168,85,247,.5);color:#C084FC}
+.cheat-quick{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.cheat-qbtn{padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.7);font-size:11px;cursor:pointer;text-align:center;transition:all .2s;font-family:'Outfit',sans-serif}
+.cheat-qbtn:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:#fff;transform:scale(1.02)}
+.cheat-qbtn.red{border-color:rgba(239,68,68,.3);color:#EF4444}.cheat-qbtn.red:hover{background:rgba(239,68,68,.15)}
+.cheat-qbtn.grn{border-color:rgba(34,197,94,.3);color:#22C55E}.cheat-qbtn.grn:hover{background:rgba(34,197,94,.15)}
+.cheat-qbtn.blu{border-color:rgba(59,130,246,.3);color:#3B82F6}.cheat-qbtn.blu:hover{background:rgba(59,130,246,.15)}
+.cheat-qbtn.ylw{border-color:rgba(234,179,8,.3);color:#EAB308}.cheat-qbtn.ylw:hover{background:rgba(234,179,8,.15)}
+.cheat-qbtn.pur{border-color:rgba(168,85,247,.3);color:#A855F7}.cheat-qbtn.pur:hover{background:rgba(168,85,247,.15)}
+.cheat-peek{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:400;background:rgba(10,5,20,.97);border:1px solid rgba(234,179,8,.3);border-radius:16px;padding:20px;min-width:300px;max-width:90vw;backdrop-filter:blur(12px)}
+.cheat-peek-cards{display:flex;flex-wrap:wrap;gap:4px;margin-top:10px;justify-content:center;max-height:50vh;overflow-y:auto}
+.cheat-peek-card{width:36px;height:52px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;border:2px solid rgba(255,255,255,.2);color:#fff;font-family:'Fredoka',sans-serif;text-shadow:0 1px 2px rgba(0,0,0,.5)}
 
 .swap-ov{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;animation:fadeIn .2s}
 .swap-panel{background:rgba(20,20,40,.97);border:1px solid rgba(234,179,8,.3);border-radius:16px;padding:20px 24px;min-width:280;max-width:380px}
@@ -1028,6 +1070,16 @@ function UnoGame() {
   const [toast, setToast] = useState(null); // {msg,type} notification
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [hostPanel, setHostPanel] = useState(false);
+  const [cheatOpen, setCheatOpen] = useState(false);
+  const [cheatTab, setCheatTab] = useState("give");
+  const [cheatTarget, setCheatTarget] = useState(0);
+  const [cheatTarget2, setCheatTarget2] = useState(1);
+  const [cheatColor, setCheatColor] = useState("red");
+  const [cheatType, setCheatType] = useState("number");
+  const [cheatValue, setCheatValue] = useState("0");
+  const [cheatCount, setCheatCount] = useState(1);
+  const [cheatRemoveIdx, setCheatRemoveIdx] = useState([]);
+  const [cheatPeek, setCheatPeek] = useState(null);
   const [mpNotice, setMpNotice] = useState("");
   const [publicRooms, setPublicRooms] = useState([]);
   const [scanning, setScanning] = useState(false);
@@ -1387,6 +1439,120 @@ function UnoGame() {
     showToast(`${players[pi]?.name || "Gracz"} wyrzucony`, "warn");
     setHostPanel(false);
   }, [mpIsHost, players, addLog, showToast]);
+
+  // Cheat: inject cards into any player's hand (host only)
+  const mkCheatCard = (color, type, value) => {
+    cid++;
+    if (type === "wild" || type === "wild4") return { id: cid, color: "black", type: "wild", value: type === "wild4" ? "+4" : "W", symbol: type === "wild4" ? "+4" : "\u2605" };
+    if (type === "skip") return { id: cid, color, type: "action", value: "skip", symbol: "\u2718" };
+    if (type === "reverse") return { id: cid, color, type: "action", value: "reverse", symbol: "\u21C4" };
+    if (type === "draw2") return { id: cid, color, type: "action", value: "+2", symbol: "+2" };
+    return { id: cid, color, type: "number", value, symbol: value };
+  };
+  // Cheat: give cards
+  var cheatGiveCards = useCallback((targetPi, color, type, value, count) => {
+    const cards = [];
+    for (let i = 0; i < count; i++) cards.push(mkCheatCard(color, type, value));
+    setPlayers(prev => prev.map((p, i) => i === targetPi ? { ...p, hand: [...p.hand, ...cards] } : p));
+    showToast("+" + count + " kart dla " + (players[targetPi]?.name || "?"), "ok");
+  }, [phase, showToast, players]);
+  // Cheat: remove selected cards from hand
+  var cheatRemoveCards = useCallback((targetPi, indices) => {
+    if (!indices.length) return;
+    setPlayers(prev => prev.map((p, i) => i === targetPi ? { ...p, hand: p.hand.filter((_, idx) => !indices.includes(idx)) } : p));
+    setCheatRemoveIdx([]);
+    showToast("Zabrano " + indices.length + " kart", "ok");
+  }, [showToast]);
+  // Cheat: clear entire hand
+  var cheatClearHand = useCallback((targetPi) => {
+    const n = players[targetPi]?.hand?.length || 0;
+    setPlayers(prev => prev.map((p, i) => i === targetPi ? { ...p, hand: [] } : p));
+    showToast("Wyczyszczono reke (" + n + " kart)", "ok");
+  }, [players, showToast]);
+  // Cheat: swap hands
+  var cheatSwapHands = useCallback((pi1, pi2) => {
+    if (pi1 === pi2) return;
+    setPlayers(prev => {
+      const np = [...prev];
+      const h1 = np[pi1].hand; const h2 = np[pi2].hand;
+      np[pi1] = { ...np[pi1], hand: h2 };
+      np[pi2] = { ...np[pi2], hand: h1 };
+      return np;
+    });
+    showToast("Zamieniono rece: " + players[pi1]?.name + " <-> " + players[pi2]?.name, "ok");
+  }, [players, showToast]);
+  // Cheat: shuffle someone's hand
+  var cheatShuffle = useCallback((targetPi) => {
+    setPlayers(prev => prev.map((p, i) => {
+      if (i !== targetPi) return p;
+      const h = [...p.hand];
+      for (let j = h.length - 1; j > 0; j--) { const k = Math.floor(Math.random() * (j + 1)); [h[j], h[k]] = [h[k], h[j]]; }
+      return { ...p, hand: h };
+    }));
+    showToast("Potasowano reke " + players[targetPi]?.name, "ok");
+  }, [players, showToast]);
+  // Cheat: bomb (give 20 random cards)
+  var cheatBomb = useCallback((targetPi) => {
+    const cols = ["red","blue","green","yellow"];
+    const cards = [];
+    for (let i = 0; i < 20; i++) {
+      const r = Math.random();
+      if (r < 0.15) cards.push(mkCheatCard("black", "wild4", ""));
+      else if (r < 0.25) cards.push(mkCheatCard("black", "wild", ""));
+      else if (r < 0.4) cards.push(mkCheatCard(cols[Math.floor(Math.random()*4)], "draw2", ""));
+      else cards.push(mkCheatCard(cols[Math.floor(Math.random()*4)], "number", String(Math.floor(Math.random()*10))));
+    }
+    setPlayers(prev => prev.map((p, i) => i === targetPi ? { ...p, hand: [...p.hand, ...cards] } : p));
+    showToast("\uD83D\uDCA3 BOMBA! +20 kart dla " + players[targetPi]?.name, "warn");
+  }, [players, showToast]);
+  // Cheat: sniper - remove all playable cards
+  var cheatSniper = useCallback((targetPi) => {
+    const top = discardPile[discardPile.length - 1];
+    if (!top) return;
+    setPlayers(prev => prev.map((p, i) => {
+      if (i !== targetPi) return p;
+      const kept = p.hand.filter(c => {
+        if (c.type === "wild") return false;
+        if (c.color === activeColor) return false;
+        if (c.value === top.value && c.type === top.type) return false;
+        return true;
+      });
+      showToast("\uD83C\uDFAF Sniper! Zabrano " + (p.hand.length - kept.length) + " grywalnych kart", "ok");
+      return { ...p, hand: kept };
+    }));
+  }, [discardPile, activeColor, showToast]);
+  // Cheat: replace hand with all same card
+  var cheatFlood = useCallback((targetPi, color, type, value) => {
+    const count = players[targetPi]?.hand?.length || 7;
+    const cards = [];
+    for (let i = 0; i < count; i++) cards.push(mkCheatCard(color, type, value));
+    setPlayers(prev => prev.map((p, i) => i === targetPi ? { ...p, hand: cards } : p));
+    showToast("\uD83C\uDF0A Flood! Cala reka zamieniona", "ok");
+  }, [players, showToast]);
+  // Cheat: force draw stack
+  var cheatSetDrawStack = useCallback((n) => {
+    setDrawStack(n);
+    showToast("Draw stack = +" + n, "ok");
+  }, [showToast]);
+  // Cheat: reverse direction
+  var cheatReverseDir = useCallback(() => {
+    setDirection(d => d * -1);
+    showToast("\u21C4 Kierunek odwrocony!", "ok");
+  }, [showToast]);
+  // Cheat: force color
+  var cheatForceColor = useCallback((c) => {
+    setColor(c);
+    showToast("Kolor zmieniony na " + c, "ok");
+  }, [showToast]);
+  // Cheat: skip to next player
+  var cheatSkipTurn = useCallback(() => {
+    setCurrent(prev => {
+      const n = players.length;
+      let next = (prev + direction + n) % n;
+      return next;
+    });
+    showToast("Tura przesunieta!", "ok");
+  }, [players, direction, showToast]);
 
   // Host: send wake/warn to player
   var mpPing = useCallback((pi, type) => {
@@ -4663,7 +4829,115 @@ function UnoGame() {
       fontSize: 11
     },
     onClick: () => setHostPanel(false)
-  }, "Zamknij"))))));
+  }, "Zamknij")), /*#__PURE__*/React.createElement("button", {
+    className: "cheat-trigger",
+    onClick: () => { setCheatOpen(true); setHostPanel(false); }
+  }, "\uD83D\uDC7E Cheats")))),
+  cheatOpen && mpIsHost && mpGameRef.current && /*#__PURE__*/React.createElement(React.Fragment, null,
+    /*#__PURE__*/React.createElement("div", {
+      style: { position: "fixed", inset: 0, zIndex: 299, background: "rgba(0,0,0,.5)" },
+      onClick: () => setCheatOpen(false)
+    }),
+    /*#__PURE__*/React.createElement("div", { className: "cheat-ov", style: { maxHeight: "85vh", overflowY: "auto" } },
+      /*#__PURE__*/React.createElement("button", { className: "cheat-close", onClick: () => setCheatOpen(false) }, "\u2715"),
+      /*#__PURE__*/React.createElement("div", { className: "cheat-title" }, "\uD83D\uDC7E Cheat Menu"),
+      /*#__PURE__*/React.createElement("div", { className: "cheat-tabs" },
+        ["give","take","peek","swap","quick","god"].map(t => /*#__PURE__*/React.createElement("div", {
+          key: t, className: "cheat-tab " + (cheatTab === t ? "act" : ""),
+          onClick: () => setCheatTab(t)
+        }, t === "give" ? "\uD83C\uDCCF Daj" : t === "take" ? "\uD83D\uDDD1 Zabierz" : t === "peek" ? "\uD83D\uDC41 Podglad" : t === "swap" ? "\uD83D\uDD04 Zamien" : t === "quick" ? "\u26A1 Szybkie" : "\uD83D\uDC51 God"))
+      ),
+      /*#__PURE__*/React.createElement("div", { className: "cheat-row" },
+        /*#__PURE__*/React.createElement("span", { className: "cheat-lbl" }, "Gracz"),
+        /*#__PURE__*/React.createElement("select", {
+          className: "cheat-sel", value: cheatTarget,
+          onChange: e => setCheatTarget(parseInt(e.target.value))
+        }, players.map((p, i) => /*#__PURE__*/React.createElement("option", { key: i, value: i }, p.emoji, " ", p.name, " [", p.hand.length, "]")))
+      ),
+      cheatTab === "give" && /*#__PURE__*/React.createElement(React.Fragment, null,
+        /*#__PURE__*/React.createElement("div", { className: "cheat-row" },
+          /*#__PURE__*/React.createElement("span", { className: "cheat-lbl" }, "Typ"),
+          /*#__PURE__*/React.createElement("select", { className: "cheat-sel", value: cheatType, onChange: e => { setCheatType(e.target.value); if(e.target.value==="wild"||e.target.value==="wild4") setCheatColor("black"); else if(cheatColor==="black") setCheatColor("red"); } },
+            /*#__PURE__*/React.createElement("option", { value: "number" }, "Liczbowa"),
+            /*#__PURE__*/React.createElement("option", { value: "skip" }, "Skip"), /*#__PURE__*/React.createElement("option", { value: "reverse" }, "Reverse"),
+            /*#__PURE__*/React.createElement("option", { value: "draw2" }, "+2"), /*#__PURE__*/React.createElement("option", { value: "wild" }, "Wild"), /*#__PURE__*/React.createElement("option", { value: "wild4" }, "Wild +4"))
+        ),
+        cheatType !== "wild" && cheatType !== "wild4" && /*#__PURE__*/React.createElement("div", { className: "cheat-row" },
+          /*#__PURE__*/React.createElement("span", { className: "cheat-lbl" }, "Kolor"),
+          /*#__PURE__*/React.createElement("select", { className: "cheat-sel", value: cheatColor, onChange: e => setCheatColor(e.target.value) },
+            /*#__PURE__*/React.createElement("option", { value: "red" }, "\uD83D\uDD34 Czerwony"), /*#__PURE__*/React.createElement("option", { value: "blue" }, "\uD83D\uDD35 Niebieski"),
+            /*#__PURE__*/React.createElement("option", { value: "green" }, "\uD83D\uDFE2 Zielony"), /*#__PURE__*/React.createElement("option", { value: "yellow" }, "\uD83D\uDFE1 Zolty"))
+        ),
+        cheatType === "number" && /*#__PURE__*/React.createElement("div", { className: "cheat-row" },
+          /*#__PURE__*/React.createElement("span", { className: "cheat-lbl" }, "Wartosc"),
+          /*#__PURE__*/React.createElement("select", { className: "cheat-sel", value: cheatValue, onChange: e => setCheatValue(e.target.value) },
+            ["0","1","2","3","4","5","6","7","8","9"].map(v => /*#__PURE__*/React.createElement("option", { key: v, value: v }, v)))
+        ),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-row" },
+          /*#__PURE__*/React.createElement("span", { className: "cheat-lbl" }, "Ilosc"),
+          /*#__PURE__*/React.createElement("select", { className: "cheat-sel", value: cheatCount, onChange: e => setCheatCount(parseInt(e.target.value)) },
+            [1,2,3,5,10,15,20,30,50].map(n => /*#__PURE__*/React.createElement("option", { key: n, value: n }, n)))
+        ),
+        /*#__PURE__*/React.createElement("button", { className: "cheat-go", onClick: () => cheatGiveCards(cheatTarget, cheatColor, cheatType, cheatValue, cheatCount) }, "\uD83C\uDCCF Daj karty")
+      ),
+      cheatTab === "take" && /*#__PURE__*/React.createElement(React.Fragment, null,
+        /*#__PURE__*/React.createElement("div", { className: "cheat-row" },
+          /*#__PURE__*/React.createElement("span", { className: "cheat-lbl" }, "Tryb"),
+          /*#__PURE__*/React.createElement("select", { className: "cheat-sel", value: cheatRemoveMode, onChange: e => setCheatRemoveMode(e.target.value) },
+            /*#__PURE__*/React.createElement("option", { value: "random" }, "\uD83C\uDFB2 Losowe"), /*#__PURE__*/React.createElement("option", { value: "best" }, "\uD83D\uDC8E Najlepsze (Wild,+4,+2)"), /*#__PURE__*/React.createElement("option", { value: "all" }, "\uD83D\uDCA3 WSZYSTKIE"))
+        ),
+        cheatRemoveMode !== "all" && /*#__PURE__*/React.createElement("div", { className: "cheat-row" },
+          /*#__PURE__*/React.createElement("span", { className: "cheat-lbl" }, "Ilosc"),
+          /*#__PURE__*/React.createElement("select", { className: "cheat-sel", value: cheatCount, onChange: e => setCheatCount(parseInt(e.target.value)) },
+            [1,2,3,5,10,15,20].map(n => /*#__PURE__*/React.createElement("option", { key: n, value: n }, n)))
+        ),
+        /*#__PURE__*/React.createElement("button", { className: "cheat-go", onClick: () => cheatRemoveCards(cheatTarget, cheatCount, cheatRemoveMode) }, "\uD83D\uDDD1 Zabierz karty")
+      ),
+      cheatTab === "peek" && /*#__PURE__*/React.createElement(React.Fragment, null,
+        /*#__PURE__*/React.createElement("button", { className: "cheat-go", onClick: () => cheatPeekHand(cheatTarget) }, "\uD83D\uDC41 Podejrzyj reke"),
+        /*#__PURE__*/React.createElement("div", { style: { color: "rgba(255,255,255,.3)", fontSize: 10, marginTop: 6, textAlign: "center" } }, "Gracz nie wie ze podgladasz")
+      ),
+      cheatTab === "swap" && /*#__PURE__*/React.createElement(React.Fragment, null,
+        /*#__PURE__*/React.createElement("div", { className: "cheat-row" },
+          /*#__PURE__*/React.createElement("span", { className: "cheat-lbl" }, "Gracz 2"),
+          /*#__PURE__*/React.createElement("select", { className: "cheat-sel", value: cheatTarget2, onChange: e => setCheatTarget2(parseInt(e.target.value)) },
+            players.map((p, i) => /*#__PURE__*/React.createElement("option", { key: i, value: i }, p.emoji, " ", p.name, " [", p.hand.length, "]")))
+        ),
+        /*#__PURE__*/React.createElement("button", { className: "cheat-go", onClick: () => cheatSwapHands(cheatTarget, cheatTarget2) }, "\uD83D\uDD04 Zamien rece"),
+        /*#__PURE__*/React.createElement("div", { style: { color: "rgba(255,255,255,.3)", fontSize: 10, marginTop: 6, textAlign: "center" } }, "Gracze nie dostana powiadomienia")
+      ),
+      cheatTab === "quick" && /*#__PURE__*/React.createElement("div", { className: "cheat-quick" },
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn red", onClick: () => cheatGiveCards(cheatTarget, "black", "wild4", "", 5) }, "\uD83D\uDCA3 5x Wild+4"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn red", onClick: () => cheatGiveCards(cheatTarget, "black", "wild4", "", 20) }, "\uD83D\uDCA5 20x Wild+4"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn blu", onClick: () => cheatShuffleHand(cheatTarget) }, "\uD83C\uDF00 Potasuj reke"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn grn", onClick: () => cheatRemoveCards(cheatTarget, 999, "best") }, "\uD83D\uDC8E Zabierz najlepsze"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn pur", onClick: () => cheatReverse() }, "\u21C4 Odwroc kierunek"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn ylw", onClick: () => cheatSkipTurn() }, "\u23ED Pomin ture"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn red", onClick: () => { cheatGiveCards(cheatTarget, "red", "draw2", "", 3); cheatGiveCards(cheatTarget, "blue", "draw2", "", 3); cheatGiveCards(cheatTarget, "green", "draw2", "", 3); cheatGiveCards(cheatTarget, "yellow", "draw2", "", 3); } }, "\uD83D\uDD25 12x +2"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn blu", onClick: () => cheatGiveCards(cheatTarget, "red", "number", "0", 50) }, "\uD83C\uDF0A 50x zer")
+      ),
+      cheatTab === "god" && /*#__PURE__*/React.createElement("div", { className: "cheat-quick" },
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn grn", onClick: () => cheatInstantWin() }, "\uD83C\uDFC6 Instant Win"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn red", onClick: () => cheatNuke() }, "\uD83D\uDCA3 NUKE (+20 innym)"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn pur", onClick: () => cheatRemoveCards(0, 999, "all") }, "\u2728 Wyczysc moja reke"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn ylw", onClick: () => cheatSetColor("red") }, "\uD83D\uDD34 Zmien: Czerwony"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn ylw", onClick: () => cheatSetColor("blue") }, "\uD83D\uDD35 Zmien: Niebieski"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn ylw", onClick: () => cheatSetColor("green") }, "\uD83D\uDFE2 Zmien: Zielony"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn ylw", onClick: () => cheatSetColor("yellow") }, "\uD83D\uDFE1 Zmien: Zolty"),
+        /*#__PURE__*/React.createElement("div", { className: "cheat-qbtn pur", onClick: () => cheatSetTop(cheatColor, cheatType, cheatValue) }, "\uD83C\uDCCF Ustaw karte na stos")
+      )
+    )
+  ),
+  cheatPeek && /*#__PURE__*/React.createElement(React.Fragment, null,
+    /*#__PURE__*/React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 399, background: "rgba(0,0,0,.6)" }, onClick: () => setCheatPeek(null) }),
+    /*#__PURE__*/React.createElement("div", { className: "cheat-peek" },
+      /*#__PURE__*/React.createElement("div", { style: { color: "#EAB308", fontWeight: 700, fontSize: 14, fontFamily: "'Fredoka',sans-serif" } }, cheatPeek.emoji, " ", cheatPeek.name, " - ", cheatPeek.hand.length, " kart"),
+      /*#__PURE__*/React.createElement("div", { className: "cheat-peek-cards" }, cheatPeek.hand.map((c, i) =>
+        /*#__PURE__*/React.createElement("div", { key: i, className: "cheat-peek-card", style: { background: c.color === "black" ? "#333" : COLORS[c.color] || "#555" } }, c.symbol || c.value)
+      )),
+      /*#__PURE__*/React.createElement("button", { className: "cheat-go", style: { marginTop: 12 }, onClick: () => setCheatPeek(null) }, "Zamknij")
+    )
+  ));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(UnoGame));
 
